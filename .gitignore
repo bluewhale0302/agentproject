@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+ENV/
+*.env
+*.env.*
+.pytest_cache/
+
+# Node
+node_modules/
+.npm/
+.npmrc
+.next/
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Data and cache
+webapp/backend/chroma_store/
+images/
+labels/
+labels2/
+tmp_chroma*/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Build output
+dist/
+build/

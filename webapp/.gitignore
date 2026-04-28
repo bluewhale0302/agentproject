@@ -1,0 +1,14 @@
+# Node
+webapp/frontend/node_modules
+webapp/frontend/.next
+
+# Python
+webapp/backend/__pycache__
+webapp/backend/*.py[cod]
+webapp/backend/.venv
+
+# ChromaDB local storage
+webapp/backend/chroma_store
+
+# Environment
+webapp/backend/.env

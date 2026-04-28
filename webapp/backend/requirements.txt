@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+pydantic
+pinecone-client
+chromadb
+sentence-transformers
+numpy
+transformers
+torch
