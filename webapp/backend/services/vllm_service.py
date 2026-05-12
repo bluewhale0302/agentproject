@@ -1,25 +1,42 @@
 """
-LLM 서비스 — Ollama HTTP API 기반 텍스트 생성.
+LLM 서비스 — Groq API 기반 텍스트 생성 (Vercel 서버리스 호환).
 
-로컬 환경: Ollama가 localhost:11434에서 실행 중이어야 함.
-Vercel 환경: OLLAMA_BASE_URL 환경변수로 외부 Ollama 서버 지정 가능.
+Groq은 무료 tier 제공, OpenAI 호환 API, qwen2.5 / llama3 등 지원.
+API 키 발급: https://console.groq.com
+
+환경변수:
+  GROQ_API_KEY   : Groq API 키 (필수)
+  DEFAULT_MODEL  : 사용할 모델명 (기본값: qwen2.5-coder-7b-instruct)
 """
 
 import logging
 import os
 from typing import Optional
 
-import requests
-
 logger = logging.getLogger(__name__)
 
-# Ollama 서버 주소 (기본값: 로컬)
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+# Groq에서 지원하는 모델명 매핑
+# 사용자가 'qwen2.5' 등 짧은 이름을 써도 동작하도록
+MODEL_ALIASES = {
+    "qwen2.5": "qwen2.5-coder-7b-instruct",
+    "qwen": "qwen2.5-coder-7b-instruct",
+    "llama3": "llama3-8b-8192",
+    "llama3.2": "llama-3.2-3b-preview",
+    "llama3.1": "llama-3.1-8b-instant",
+    "mixtral": "mixtral-8x7b-32768",
+    "gemma": "gemma2-9b-it",
+}
+
+DEFAULT_GROQ_MODEL = "qwen2.5-coder-7b-instruct"
 
 
 class VLLMService:
     def __init__(self, model_name: str = "qwen2.5"):
         self.model_name = model_name
+
+    def _resolve_model(self, model_name: str) -> str:
+        """짧은 모델명을 Groq 실제 모델명으로 변환."""
+        return MODEL_ALIASES.get(model_name.lower(), model_name)
 
     def generate(
         self,
@@ -29,57 +46,64 @@ class VLLMService:
         top_p: float = 0.95,
         model_name: Optional[str] = None,
     ) -> str:
-        """Ollama HTTP API를 통해 텍스트 생성.
+        """Groq API를 통해 텍스트 생성.
 
         Args:
             prompt: 입력 프롬프트
             max_tokens: 최대 생성 토큰 수
             temperature: 샘플링 온도 (0~2)
             top_p: Top-P 샘플링
-            model_name: 사용할 모델명 (없으면 기본값 사용)
+            model_name: 사용할 모델명
 
         Returns:
             생성된 텍스트
 
         Raises:
-            RuntimeError: Ollama 서버 연결 실패 또는 생성 오류
+            RuntimeError: API 키 미설정 또는 호출 실패
         """
-        model = model_name or self.model_name
-
-        payload = {
-            "model": model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "num_predict": max_tokens,
-                "temperature": temperature,
-                "top_p": top_p,
-            },
-        }
+        api_key = os.getenv("GROQ_API_KEY", "")
+        if not api_key:
+            raise RuntimeError(
+                "GROQ_API_KEY 환경변수가 설정되지 않았습니다. "
+                "https://console.groq.com 에서 무료 API 키를 발급받아 "
+                "Vercel 환경변수에 추가하세요."
+            )
 
         try:
-            resp = requests.post(
-                f"{OLLAMA_BASE_URL}/api/generate",
-                json=payload,
-                timeout=120,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            text = data.get("response", "").strip()
-            if not text:
-                raise RuntimeError("Ollama가 빈 응답을 반환했습니다.")
-            return text
+            from openai import OpenAI
+        except ImportError as exc:
+            raise RuntimeError("openai 패키지가 필요합니다: pip install openai") from exc
 
-        except requests.exceptions.ConnectionError:
-            raise RuntimeError(
-                f"Ollama 서버에 연결할 수 없습니다 ({OLLAMA_BASE_URL}). "
-                "로컬에서는 'ollama serve'를 실행하거나, "
-                "OLLAMA_BASE_URL 환경변수로 외부 서버를 지정하세요."
+        model = self._resolve_model(model_name or self.model_name)
+
+        client = OpenAI(
+            api_key=api_key,
+            base_url="https://api.groq.com/openai/v1",
+        )
+
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
             )
-        except requests.exceptions.Timeout:
-            raise RuntimeError("Ollama 응답 시간 초과 (120초). 모델이 너무 크거나 서버가 느립니다.")
-        except requests.exceptions.HTTPError as exc:
-            status = exc.response.status_code if exc.response is not None else "unknown"
-            raise RuntimeError(f"Ollama HTTP 오류 {status}: {exc}")
+            text = response.choices[0].message.content or ""
+            if not text.strip():
+                raise RuntimeError("Groq API가 빈 응답을 반환했습니다.")
+            return text.strip()
+
+        except RuntimeError:
+            raise
         except Exception as exc:
+            # openai 라이브러리 예외 처리
+            err = str(exc)
+            if "authentication" in err.lower() or "api_key" in err.lower():
+                raise RuntimeError(f"Groq API 인증 실패. API 키를 확인하세요: {exc}")
+            if "model" in err.lower() and "not found" in err.lower():
+                raise RuntimeError(
+                    f"모델 '{model}'을 찾을 수 없습니다. "
+                    f"지원 모델: {', '.join(MODEL_ALIASES.values())}"
+                )
             raise RuntimeError(f"텍스트 생성 실패: {exc}")
