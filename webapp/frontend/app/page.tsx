@@ -160,8 +160,7 @@ export default function Home() {
   }
 
   return (
-    <>
-      <main className="min-h-screen bg-slate-950 text-slate-100 p-6">
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-6">
       <div className="mx-auto max-w-6xl">
         <div className="rounded-3xl border border-slate-800 bg-slate-900/90 p-8 shadow-2xl shadow-slate-950/20">
           <h1 className="text-4xl font-semibold text-emerald-300">게임 플레이 어시스턴트</h1>
@@ -350,6 +349,5 @@ export default function Home() {
         </div>
       </div>
     </main>
-    </>
   );
 }
