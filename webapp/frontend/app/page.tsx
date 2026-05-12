@@ -2,32 +2,48 @@
 
 import { useState } from 'react';
 
+type TabType = 'generate' | 'search' | 'steam' | 'riot';
+
 export default function Home() {
+  const [activeTab, setActiveTab] = useState<TabType>('generate');
   const [prompt, setPrompt] = useState('내 최근 게임 플레이 기록을 분석해 다음 주에 즐기기 좋은 게임을 추천해줘.');
   const [response, setResponse] = useState('');
   const [query, setQuery] = useState('최신 패치노트에서 중요 변경점 요약');
   const [searchResult, setSearchResult] = useState('');
+  const [steamId, setSteamId] = useState('');
+  const [steamResult, setSteamResult] = useState('');
+  const [riotSummonerName, setRiotSummonerName] = useState('');
+  const [riotTag, setRiotTag] = useState('');
+  const [riotRegion, setRiotRegion] = useState('na1');
+  const [riotResult, setRiotResult] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const clearError = () => setError('');
 
   async function handleGenerate() {
+    clearError();
     setLoading(true);
     setResponse('');
     try {
       const res = await fetch('http://localhost:8000/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, max_tokens: 180 }),
+        body: JSON.stringify({ prompt, max_tokens: 512 }),
       });
       const data = await res.json();
       setResponse(data.text ?? data.detail ?? data.error ?? '응답이 없습니다.');
-    } catch (error) {
-      setResponse('서버 호출 실패: ' + String(error));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError('서버 호출 실패: ' + msg);
+      setResponse('');
     } finally {
       setLoading(false);
     }
   }
 
   async function handleSearch() {
+    clearError();
     setLoading(true);
     setSearchResult('');
     try {
@@ -38,8 +54,106 @@ export default function Home() {
       });
       const data = await res.json();
       setSearchResult(JSON.stringify(data, null, 2));
-    } catch (error) {
-      setSearchResult('검색 호출 실패: ' + String(error));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError('검색 호출 실패: ' + msg);
+      setSearchResult('');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSteamUser() {
+    clearError();
+    if (!steamId.trim()) {
+      setError('Steam ID를 입력하세요.');
+      return;
+    }
+    setLoading(true);
+    setSteamResult('');
+    try {
+      const res = await fetch('http://localhost:8000/api/games/steam/user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ steam_id: steamId }),
+      });
+      const data = await res.json();
+      setSteamResult(JSON.stringify(data, null, 2));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError('Steam API 호출 실패: ' + msg);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSteamGames() {
+    clearError();
+    if (!steamId.trim()) {
+      setError('Steam ID를 입력하세요.');
+      return;
+    }
+    setLoading(true);
+    setSteamResult('');
+    try {
+      const res = await fetch('http://localhost:8000/api/games/steam/games', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ steam_id: steamId }),
+      });
+      const data = await res.json();
+      setSteamResult(JSON.stringify(data, null, 2));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError('Steam 게임 조회 실패: ' + msg);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleRiotSummoner() {
+    clearError();
+    if (!riotSummonerName.trim() || !riotTag.trim()) {
+      setError('소환사명과 태그를 입력하세요.');
+      return;
+    }
+    setLoading(true);
+    setRiotResult('');
+    try {
+      const res = await fetch('http://localhost:8000/api/games/riot/summoner', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ summoner_name: riotSummonerName, tag: riotTag, region: riotRegion }),
+      });
+      const data = await res.json();
+      setRiotResult(JSON.stringify(data, null, 2));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError('Riot API 호출 실패: ' + msg);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleRiotRanked() {
+    clearError();
+    if (!riotSummonerName.trim() || !riotTag.trim()) {
+      setError('소환사명과 태그를 입력하세요.');
+      return;
+    }
+    setLoading(true);
+    setRiotResult('');
+    try {
+      const res = await fetch('http://localhost:8000/api/games/riot/ranked', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ summoner_name: riotSummonerName, tag: riotTag, region: riotRegion }),
+      });
+      const data = await res.json();
+      setRiotResult(JSON.stringify(data, null, 2));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError('Riot 랭크 조회 실패: ' + msg);
     } finally {
       setLoading(false);
     }
@@ -47,75 +161,227 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-6">
-      <div className="mx-auto max-w-6xl rounded-3xl border border-slate-800 bg-slate-900/90 p-8 shadow-2xl shadow-slate-950/20">
-        <h1 className="text-4xl font-semibold text-emerald-300">게임 플레이 어시스턴트</h1>
-        <p className="mt-3 text-slate-400">
-          플레이 기록을 분석해 맞춤형 게임을 추천하고, 방대한 패치노트와 공략 정보를 핵심만 정리해드립니다.
-          게이머의 시간과 탐색 비용을 획기적으로 절감하는 개인화형 게임 어시스턴트입니다.
-        </p>
+      <div className="mx-auto max-w-6xl">
+        <div className="rounded-3xl border border-slate-800 bg-slate-900/90 p-8 shadow-2xl shadow-slate-950/20">
+          <h1 className="text-4xl font-semibold text-emerald-300">게임 플레이 어시스턴트</h1>
+          <p className="mt-3 text-slate-400">
+            AI 모델을 활용한 게임 추천, 벡터 검색 기반 정보 조회, Steam과 Riot Games API 통합
+          </p>
 
-        <div className="mt-8 grid gap-4 md:grid-cols-2">
-          <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
-            <h2 className="text-xl font-semibold text-white">추천형 AI</h2>
-            <p className="mt-3 text-slate-400">사용자의 플레이 히스토리를 반영한 게임 추천과 전략 가이드를 제공합니다.</p>
-          </div>
-          <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
-            <h2 className="text-xl font-semibold text-white">요약형 정보</h2>
-            <p className="mt-3 text-slate-400">패치노트, 공략, 패치 영향까지 핵심만 골라 쉽고 빠르게 확인합니다.</p>
-          </div>
-          <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
-            <h2 className="text-xl font-semibold text-white">벡터 검색</h2>
-            <p className="mt-3 text-slate-400">게임 데이터 검색과 유사 문서 탐색을 통해 필요한 정보에 빠르게 접근합니다.</p>
-          </div>
-          <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
-            <h2 className="text-xl font-semibold text-white">시간 절약</h2>
-            <p className="mt-3 text-slate-400">분석과 요약 기반 콘텐츠로 탐색 비용을 크게 줄여줍니다.</p>
-          </div>
-        </div>
+          {error && (
+            <div className="mt-6 rounded-2xl border border-red-700 bg-red-900/30 p-4 text-red-200">
+              {error}
+              <button onClick={clearError} className="ml-4 text-red-100 underline">닫기</button>
+            </div>
+          )}
 
-        <section className="mt-10 space-y-4">
-          <div>
-            <h2 className="text-2xl font-semibold text-white">맞춤형 질의</h2>
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              className="mt-3 w-full rounded-2xl border border-slate-700 bg-slate-950 p-4 text-base text-slate-100 outline-none transition focus:border-emerald-400"
-              rows={6}
-            />
-            <button
-              onClick={handleGenerate}
-              className="mt-4 rounded-2xl bg-emerald-500 px-6 py-3 font-medium text-slate-950 transition hover:bg-emerald-400 disabled:opacity-40"
-              disabled={loading}
-            >
-              생성 실행
-            </button>
-            <pre className="mt-4 whitespace-pre-wrap rounded-2xl border border-slate-800 bg-slate-950 p-4 text-slate-200">
-              {response || '응답이 여기에 표시됩니다.'}
-            </pre>
+          <div className="mt-8 grid gap-4 md:grid-cols-2">
+            <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
+              <h2 className="text-xl font-semibold text-white">🤖 AI 텍스트 생성</h2>
+              <p className="mt-3 text-slate-400">Qwen2.5, Llama3, Llama3.2 모델을 사용한 텍스트 생성</p>
+            </div>
+            <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
+              <h2 className="text-xl font-semibold text-white">🔍 벡터 검색</h2>
+              <p className="mt-3 text-slate-400">ChromaDB 기반 문서 검색 및 유사도 분석</p>
+            </div>
+            <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
+              <h2 className="text-xl font-semibold text-white">🎮 Steam 정보</h2>
+              <p className="mt-3 text-slate-400">Steam 사용자 프로필과 게임 라이브러리 조회</p>
+            </div>
+            <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-6">
+              <h2 className="text-xl font-semibold text-white">⚔️ Riot Games</h2>
+              <p className="mt-3 text-slate-400">LOL 소환사 정보 및 랭크 통계 조회</p>
+            </div>
           </div>
 
-          <div className="mt-10">
-            <h2 className="text-2xl font-semibold text-white">검색/벡터 검색</h2>
-            <div className="mt-3 flex gap-3">
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                className="w-full rounded-2xl border border-slate-700 bg-slate-950 p-4 text-base text-slate-100 outline-none"
-                placeholder="검색할 텍스트를 입력하세요"
+          <section className="mt-10 space-y-8">
+            {/* AI 생성 */}
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-6">
+              <h2 className="text-2xl font-semibold text-emerald-300">AI 텍스트 생성</h2>
+              <textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                disabled={loading}
+                className="mt-4 w-full rounded-xl border border-slate-700 bg-slate-950 p-4 text-slate-100 outline-none transition disabled:opacity-50 focus:border-emerald-400"
+                rows={5}
+                placeholder="생성할 텍스트에 대해 설명하세요..."
               />
               <button
-                onClick={handleSearch}
-                className="rounded-2xl bg-sky-500 px-6 py-3 font-medium text-slate-950 transition hover:bg-sky-400 disabled:opacity-40"
+                onClick={handleGenerate}
                 disabled={loading}
+                className="mt-4 rounded-xl bg-emerald-500 px-6 py-3 font-medium text-slate-950 transition hover:bg-emerald-400 disabled:opacity-50"
               >
-                검색 실행
+                {loading ? '생성 중...' : '생성 실행'}
               </button>
+              {response && (
+                <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950 p-4">
+                  <p className="text-sm text-slate-400">응답:</p>
+                  <pre className="mt-2 whitespace-pre-wrap text-slate-200 text-sm max-h-96 overflow-auto">
+                    {response}
+                  </pre>
+                </div>
+              )}
             </div>
-            <pre className="mt-4 whitespace-pre-wrap rounded-2xl border border-slate-800 bg-slate-950 p-4 text-slate-200">
-              {searchResult || '검색 결과가 여기에 표시됩니다.'}
-            </pre>
-          </div>
-        </section>
+
+            {/* 벡터 검색 */}
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-6">
+              <h2 className="text-2xl font-semibold text-sky-300">벡터 검색</h2>
+              <div className="mt-4 flex gap-3">
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  disabled={loading}
+                  className="flex-1 rounded-xl border border-slate-700 bg-slate-950 p-4 text-slate-100 outline-none transition disabled:opacity-50 focus:border-sky-400"
+                  placeholder="검색할 텍스트를 입력하세요..."
+                />
+                <button
+                  onClick={handleSearch}
+                  disabled={loading}
+                  className="rounded-xl bg-sky-500 px-6 py-3 font-medium text-slate-950 transition hover:bg-sky-400 disabled:opacity-50"
+                >
+                  {loading ? '검색 중...' : '검색'}
+                </button>
+              </div>
+              {searchResult && (
+                <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950 p-4">
+                  <p className="text-sm text-slate-400">검색 결과:</p>
+                  <pre className="mt-2 whitespace-pre-wrap text-slate-200 text-sm max-h-96 overflow-auto">
+                    {searchResult}
+                  </pre>
+                </div>
+              )}
+            </div>
+
+            {/* Steam 조회 */}
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-6">
+              <h2 className="text-2xl font-semibold text-blue-300">Steam 정보 조회</h2>
+              <input
+                value={steamId}
+                onChange={(e) => setSteamId(e.target.value)}
+                disabled={loading}
+                className="mt-4 w-full rounded-xl border border-slate-700 bg-slate-950 p-4 text-slate-100 outline-none transition disabled:opacity-50 focus:border-blue-400"
+                placeholder="Steam ID 입력 (예: 76561198000000000)"
+              />
+              <div className="mt-4 flex gap-3">
+                <button
+                  onClick={handleSteamUser}
+                  disabled={loading}
+                  className="rounded-xl bg-blue-500 px-6 py-3 font-medium text-slate-950 transition hover:bg-blue-400 disabled:opacity-50"
+                >
+                  {loading ? '조회 중...' : '사용자 정보'}
+                </button>
+                <button
+                  onClick={handleSteamGames}
+                  disabled={loading}
+                  className="rounded-xl bg-blue-500 px-6 py-3 font-medium text-slate-950 transition hover:bg-blue-400 disabled:opacity-50"
+                >
+                  {loading ? '조회 중...' : '게임 목록'}
+                </button>
+              </div>
+              {steamResult && (
+                <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950 p-4">
+                  <p className="text-sm text-slate-400">Steam 정보:</p>
+                  <pre className="mt-2 whitespace-pre-wrap text-slate-200 text-sm max-h-96 overflow-auto">
+                    {steamResult}
+                  </pre>
+                </div>
+              )}
+            </div>
+
+            {/* Riot Games 조회 */}
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-6">
+              <h2 className="text-2xl font-semibold text-purple-300">Riot Games (LOL) 정보 조회</h2>
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <input
+                  value={riotSummonerName}
+                  onChange={(e) => setRiotSummonerName(e.target.value)}
+                  disabled={loading}
+                  className="rounded-xl border border-slate-700 bg-slate-950 p-4 text-slate-100 outline-none transition disabled:opacity-50 focus:border-purple-400"
+                  placeholder="소환사명 (예: Faker)"
+                />
+                <input
+                  value={riotTag}
+                  onChange={(e) => setRiotTag(e.target.value)}
+                  disabled={loading}
+                  className="rounded-xl border border-slate-700 bg-slate-950 p-4 text-slate-100 outline-none transition disabled:opacity-50 focus:border-purple-400"
+                  placeholder="태그 (예: KR1)"
+                />
+                <select
+                  value={riotRegion}
+                  onChange={(e) => setRiotRegion(e.target.value)}
+                  disabled={loading}
+                  className="rounded-xl border border-slate-700 bg-slate-950 p-4 text-slate-100 outline-none transition disabled:opacity-50 focus:border-purple-400"
+                >
+                  <option value="na1">NA</option>
+                  <option value="euw1">EU</option>
+                  <option value="kr">KR</option>
+                  <option value="br1">BR</option>
+                  <option value="la1">LA1</option>
+                  <option value="la2">LA2</option>
+                </select>
+              </div>
+              <div className="mt-4 flex gap-3">
+                <button
+                  onClick={handleRiotSummoner}
+                  disabled={loading}
+                  className="rounded-xl bg-purple-500 px-6 py-3 font-medium text-slate-950 transition hover:bg-purple-400 disabled:opacity-50"
+                >
+                  {loading ? '조회 중...' : '소환사 정보'}
+                </button>
+                <button
+                  onClick={handleRiotRanked}
+                  disabled={loading}
+                  className="rounded-xl bg-purple-500 px-6 py-3 font-medium text-slate-950 transition hover:bg-purple-400 disabled:opacity-50"
+                >
+                  {loading ? '조회 중...' : '랭크 정보'}
+                </button>
+              </div>
+              {riotResult && (
+                <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950 p-4">
+                  <p className="text-sm text-slate-400">Riot Games 정보:</p>
+                  <pre className="mt-2 whitespace-pre-wrap text-slate-200 text-sm max-h-96 overflow-auto">
+                    {riotResult}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </section>
+        </div
+                  <option value="na1">NA</option>
+                  <option value="euw1">EU</option>
+                  <option value="kr">KR</option>
+                  <option value="br1">BR</option>
+                  <option value="la1">LA1</option>
+                  <option value="la2">LA2</option>
+                </select>
+              </div>
+              <div className="mt-4 flex gap-3">
+                <button
+                  onClick={handleRiotSummoner}
+                  disabled={loading}
+                  className="rounded-xl bg-purple-500 px-6 py-3 font-medium text-slate-950 transition hover:bg-purple-400 disabled:opacity-50"
+                >
+                  {loading ? '조회 중...' : '소환사 정보'}
+                </button>
+                <button
+                  onClick={handleRiotRanked}
+                  disabled={loading}
+                  className="rounded-xl bg-purple-500 px-6 py-3 font-medium text-slate-950 transition hover:bg-purple-400 disabled:opacity-50"
+                >
+                  {loading ? '조회 중...' : '랭크 정보'}
+                </button>
+              </div>
+              {riotResult && (
+                <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950 p-4">
+                  <p className="text-sm text-slate-400">Riot Games 정보:</p>
+                  <pre className="mt-2 whitespace-pre-wrap text-slate-200 text-sm max-h-96 overflow-auto">
+                    {riotResult}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
       </div>
     </main>
   );

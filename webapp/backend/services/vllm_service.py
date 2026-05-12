@@ -1,4 +1,6 @@
+import json
 import os
+import shutil
 import subprocess
 import sys
 from typing import Any, Optional
@@ -10,6 +12,8 @@ except Exception:
     LLM = None
     SamplingParams = None
     VLLM_AVAILABLE = False
+
+OLLAMA_AVAILABLE = shutil.which('ollama') is not None
 
 try:
     from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
@@ -126,6 +130,12 @@ class VLLMService:
             except Exception as exc:
                 model_load_error = model_load_error or str(exc)
 
+        if OLLAMA_AVAILABLE:
+            try:
+                return self._generate_from_ollama(prompt, max_tokens, temperature, top_p)
+            except RuntimeError as exc:
+                model_load_error = model_load_error or str(exc)
+
         if VLLM_AVAILABLE:
             try:
                 return self._generate_from_cli(prompt, max_tokens, temperature, top_p)
@@ -141,6 +151,60 @@ class VLLMService:
         raise RuntimeError(
             'vLLM와 Transformers 모두 사용할 수 없습니다. Windows 환경에서는 WSL/Linux에서 vLLM을 설치하거나 torch 및 transformers를 설치하여 로컬 CPU 생성을 사용하세요.'
         )
+
+    def _generate_from_ollama(self, prompt: str, max_tokens: int, temperature: float, top_p: float) -> str:
+        """Ollama CLI를 통한 텍스트 생성
+        
+        Args:
+            prompt: 입력 프롬프트
+            max_tokens: 최대 토큰 수
+            temperature: 온도 (다양성)
+            top_p: Top-P 샘플링
+            
+        Returns:
+            생성된 텍스트
+            
+        Raises:
+            RuntimeError: Ollama CLI 실행 실패 시
+        """
+        if not OLLAMA_AVAILABLE:
+            raise RuntimeError('Ollama CLI가 설치되어 있지 않습니다.')
+
+        command = [
+            'ollama',
+            'run',
+            self.model_name,
+            prompt,
+            '--format',
+            'json',
+        ]
+        
+        try:
+            process = subprocess.run(
+                command, 
+                capture_output=True, 
+                text=True, 
+                encoding='utf-8', 
+                errors='replace',
+                timeout=120
+            )
+            
+            if process.returncode != 0:
+                error_msg = process.stderr or 'Ollama CLI 실행 실패'
+                raise RuntimeError(f'Ollama 오류: {error_msg}')
+
+            try:
+                data = json.loads(process.stdout)
+                if isinstance(data, dict) and 'response' in data:
+                    return data['response']
+                return process.stdout.strip()
+            except json.JSONDecodeError:
+                return process.stdout.strip()
+                
+        except subprocess.TimeoutExpired:
+            raise RuntimeError('Ollama 실행 시간 초과 (120초)')
+        except Exception as exc:
+            raise RuntimeError(f'Ollama 실행 중 오류: {exc}')
 
     def _generate_from_cli(self, prompt: str, max_tokens: int, temperature: float, top_p: float) -> str:
         command = [
