@@ -59,7 +59,7 @@ class RiotRequest(BaseModel):
     tag: str
     region: str = 'na1'
 
-DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', 'qwen2.5')
+DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', 'microsoft/DialoGPT-medium')
 
 try:
     vllm_service = VLLMService(model_name=DEFAULT_MODEL)

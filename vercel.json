@@ -1,0 +1,31 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "webapp/frontend/package.json",
+      "use": "@vercel/next"
+    },
+    {
+      "src": "webapp/backend/main.py",
+      "use": "@vercel/python",
+      "config": {
+        "maxLambdaSize": "50mb"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/webapp/backend/main.py"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/webapp/frontend/$1"
+    }
+  ],
+  "env": {
+    "DEFAULT_MODEL": "qwen2.5",
+    "CHROMA_PERSIST_DIR": "./chroma_store",
+    "EMBEDDING_MODEL": "all-MiniLM-L6-v2"
+  }
+}

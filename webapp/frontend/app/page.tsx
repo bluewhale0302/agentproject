@@ -26,7 +26,7 @@ export default function Home() {
     setLoading(true);
     setResponse('');
     try {
-      const res = await fetch('http://localhost:8000/api/generate', {
+      const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt, max_tokens: 512 }),
@@ -47,7 +47,7 @@ export default function Home() {
     setLoading(true);
     setSearchResult('');
     try {
-      const res = await fetch('http://localhost:8000/api/search', {
+      const res = await fetch('/api/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query, top_k: 5 }),
@@ -72,7 +72,7 @@ export default function Home() {
     setLoading(true);
     setSteamResult('');
     try {
-      const res = await fetch('http://localhost:8000/api/games/steam/user', {
+      const res = await fetch('/api/games/steam/user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ steam_id: steamId }),
@@ -96,7 +96,7 @@ export default function Home() {
     setLoading(true);
     setSteamResult('');
     try {
-      const res = await fetch('http://localhost:8000/api/games/steam/games', {
+      const res = await fetch('/api/games/steam/games', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ steam_id: steamId }),
@@ -120,7 +120,7 @@ export default function Home() {
     setLoading(true);
     setRiotResult('');
     try {
-      const res = await fetch('http://localhost:8000/api/games/riot/summoner', {
+      const res = await fetch('/api/riot/summoner', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ summoner_name: riotSummonerName, tag: riotTag, region: riotRegion }),
@@ -144,7 +144,7 @@ export default function Home() {
     setLoading(true);
     setRiotResult('');
     try {
-      const res = await fetch('http://localhost:8000/api/games/riot/ranked', {
+      const res = await fetch('/api/riot/ranked', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ summoner_name: riotSummonerName, tag: riotTag, region: riotRegion }),
