@@ -160,7 +160,8 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 p-6">
+    <>
+      <main className="min-h-screen bg-slate-950 text-slate-100 p-6">
       <div className="mx-auto max-w-6xl">
         <div className="rounded-3xl border border-slate-800 bg-slate-900/90 p-8 shadow-2xl shadow-slate-950/20">
           <h1 className="text-4xl font-semibold text-emerald-300">게임 플레이 어시스턴트</h1>
@@ -346,43 +347,9 @@ export default function Home() {
               )}
             </div>
           </section>
-        </div
-                  <option value="na1">NA</option>
-                  <option value="euw1">EU</option>
-                  <option value="kr">KR</option>
-                  <option value="br1">BR</option>
-                  <option value="la1">LA1</option>
-                  <option value="la2">LA2</option>
-                </select>
-              </div>
-              <div className="mt-4 flex gap-3">
-                <button
-                  onClick={handleRiotSummoner}
-                  disabled={loading}
-                  className="rounded-xl bg-purple-500 px-6 py-3 font-medium text-slate-950 transition hover:bg-purple-400 disabled:opacity-50"
-                >
-                  {loading ? '조회 중...' : '소환사 정보'}
-                </button>
-                <button
-                  onClick={handleRiotRanked}
-                  disabled={loading}
-                  className="rounded-xl bg-purple-500 px-6 py-3 font-medium text-slate-950 transition hover:bg-purple-400 disabled:opacity-50"
-                >
-                  {loading ? '조회 중...' : '랭크 정보'}
-                </button>
-              </div>
-              {riotResult && (
-                <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950 p-4">
-                  <p className="text-sm text-slate-400">Riot Games 정보:</p>
-                  <pre className="mt-2 whitespace-pre-wrap text-slate-200 text-sm max-h-96 overflow-auto">
-                    {riotResult}
-                  </pre>
-                </div>
-              )}
-            </div>
-          </section>
         </div>
       </div>
     </main>
+    </>
   );
 }
