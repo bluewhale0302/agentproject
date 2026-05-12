@@ -18,9 +18,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title='vLLM FastAPI', version='0.1.0')
+_CORS_ORIGINS = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+]
+# Vercel 배포 도메인 (환경변수로 추가 가능)
+_extra = os.getenv('CORS_ORIGINS', '')
+if _extra:
+    _CORS_ORIGINS.extend([o.strip() for o in _extra.split(',') if o.strip()])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=['http://localhost:3000', 'http://127.0.0.1:3000'],
+    allow_origins=_CORS_ORIGINS,
+    allow_origin_regex=r'https://.*\.vercel\.app',
     allow_methods=['*'],
     allow_headers=['*'],
 )
@@ -59,14 +69,14 @@ class RiotRequest(BaseModel):
     tag: str
     region: str = 'na1'
 
-DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', 'microsoft/DialoGPT-medium')
+DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', 'qwen2.5')
 
 try:
     vllm_service = VLLMService(model_name=DEFAULT_MODEL)
-    logger.info(f'vLLM 서비스 초기화 완료: {DEFAULT_MODEL}')
+    logger.info(f'LLM 서비스 초기화 완료: {DEFAULT_MODEL}')
 except Exception as exc:
-    logger.error(f'vLLM 서비스 초기화 실패: {exc}')
-    raise RuntimeError(f'vLLM 서비스 초기화 실패: {exc}')
+    logger.warning(f'LLM 서비스 초기화 경고 (요청 시 재시도): {exc}')
+    vllm_service = VLLMService(model_name=DEFAULT_MODEL)
 
 vector_store = None
 game_service = GameService()

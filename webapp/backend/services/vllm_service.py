@@ -1,76 +1,25 @@
-import json
+"""
+LLM 서비스 — Ollama HTTP API 기반 텍스트 생성.
+
+로컬 환경: Ollama가 localhost:11434에서 실행 중이어야 함.
+Vercel 환경: OLLAMA_BASE_URL 환경변수로 외부 Ollama 서버 지정 가능.
+"""
+
+import logging
 import os
-import shutil
-import subprocess
-import sys
-from typing import Any, Optional
+from typing import Optional
 
-try:
-    from vllm import LLM, SamplingParams
-    VLLM_AVAILABLE = True
-except Exception:
-    LLM = None
-    SamplingParams = None
-    VLLM_AVAILABLE = False
+import requests
 
-OLLAMA_AVAILABLE = shutil.which('ollama') is not None
+logger = logging.getLogger(__name__)
 
-try:
-    from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
-    TRANSFORMERS_AVAILABLE = True
-except Exception:
-    AutoModelForCausalLM = None
-    AutoTokenizer = None
-    pipeline = None
-    TRANSFORMERS_AVAILABLE = False
+# Ollama 서버 주소 (기본값: 로컬)
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
 
 class VLLMService:
-    def __init__(self, model_name: str = 'gpt2'):
+    def __init__(self, model_name: str = "qwen2.5"):
         self.model_name = model_name
-        self.llm: Optional[Any] = None
-        self.generator: Optional[Any] = None
-
-    def _init_vllm(self, model_name: str) -> None:
-        if not VLLM_AVAILABLE:
-            return
-
-        try:
-            self.llm = LLM(model=model_name)
-            self.model_name = model_name
-        except Exception as exc:
-            self.llm = None
-            raise RuntimeError(
-                'vLLM 엔진 초기화에 실패했습니다. Windows 환경에서 vllm 확장 모듈이 없거나 GPU/CUDA 설정이 잘못되었을 수 있습니다. ' 
-                f'원본 오류: {exc}'
-            ) from exc
-
-    def _init_transformers(self, model_name: str) -> None:
-        if not TRANSFORMERS_AVAILABLE:
-            raise RuntimeError('transformers 패키지가 필요합니다. pip install transformers')
-
-        local_only = os.getenv('HF_LOCAL_FILES_ONLY', '0').lower() in ('1', 'true', 'yes')
-        if os.getenv('HUGGINGFACE_HUB_DISABLE_SSL_VERIFY', '0').lower() in ('1', 'true', 'yes'):
-            os.environ['HUGGINGFACE_HUB_DISABLE_SSL_VERIFY'] = '1'
-
-        model_kwargs = {
-            'local_files_only': local_only,
-        }
-        if model_name.lower().startswith('qwen'):
-            model_kwargs['trust_remote_code'] = True
-
-        try:
-            tokenizer = AutoTokenizer.from_pretrained(model_name, **model_kwargs)
-            model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
-            self.generator = pipeline('text-generation', model=model, tokenizer=tokenizer, device=-1)
-            self.model_name = model_name
-        except Exception as exc:
-            self.generator = None
-            raise RuntimeError(
-                'Transformers 모델 로드에 실패했습니다. 인터넷 연결, SSL 인증서 또는 로컬 캐시 문제를 확인하세요. '
-                'HF_LOCAL_FILES_ONLY=1 또는 HUGGINGFACE_HUB_DISABLE_SSL_VERIFY=1을 시도하거나, 로컬 모델 경로를 DEFAULT_MODEL에 설정하세요. '
-                f'원본 오류: {exc}'
-            ) from exc
 
     def generate(
         self,
@@ -80,192 +29,57 @@ class VLLMService:
         top_p: float = 0.95,
         model_name: Optional[str] = None,
     ) -> str:
-        model_name = model_name or self.model_name
-        model_load_error = None
+        """Ollama HTTP API를 통해 텍스트 생성.
 
-        if self.llm is None and VLLM_AVAILABLE:
-            try:
-                self._init_vllm(model_name)
-            except RuntimeError as exc:
-                model_load_error = str(exc)
-                self.llm = None
-
-        if self.llm is not None and model_name != self.model_name:
-            try:
-                self._init_vllm(model_name)
-            except RuntimeError as exc:
-                model_load_error = str(exc)
-                self.llm = None
-
-        if self.llm is not None and SamplingParams is not None:
-            sampling_params = SamplingParams(max_tokens=max_tokens, temperature=temperature, top_p=top_p)
-            outputs = self.llm.generate(prompt, sampling_params=sampling_params)
-            if outputs is None:
-                raise RuntimeError('vLLM가 출력을 반환하지 않았습니다.')
-
-            try:
-                return ''.join([getattr(output, 'text', str(output)) for output in outputs])
-            except Exception:
-                return str(outputs)
-
-        if self.generator is None or model_name != self.model_name:
-            if TRANSFORMERS_AVAILABLE:
-                try:
-                    self._init_transformers(model_name)
-                except RuntimeError as exc:
-                    model_load_error = model_load_error or str(exc)
-
-        if self.generator is not None:
-            try:
-                results = self.generator(
-                    prompt,
-                    max_new_tokens=max_tokens,
-                    temperature=temperature,
-                    top_p=top_p,
-                    do_sample=True,
-                )
-                if results and isinstance(results, list):
-                    return results[0].get('generated_text', str(results[0]))
-                return str(results)
-            except Exception as exc:
-                model_load_error = model_load_error or str(exc)
-
-        if OLLAMA_AVAILABLE:
-            try:
-                return self._generate_from_ollama(prompt, max_tokens, temperature, top_p)
-            except RuntimeError as exc:
-                model_load_error = model_load_error or str(exc)
-
-        # Vercel에서는 Ollama 대신 transformers만 사용
-        if TRANSFORMERS_AVAILABLE:
-            try:
-                return self._generate_from_transformers_only(prompt, max_tokens, temperature, top_p)
-            except RuntimeError as exc:
-                model_load_error = model_load_error or str(exc)
-
-        if model_load_error:
-            return (
-                '모델을 불러올 수 없습니다. 현재 환경에서 자동 생성이 불가합니다. ' 
-                f'오류: {model_load_error}'
-            )
-
-        raise RuntimeError(
-            'Transformers를 사용할 수 없습니다. 패키지 설치 또는 모델 경로를 확인하세요.'
-        )
-
-    def _generate_from_transformers_only(self, prompt: str, max_tokens: int, temperature: float, top_p: float) -> str:
-        """Transformers만을 사용한 텍스트 생성 (Vercel용)
-        
         Args:
             prompt: 입력 프롬프트
-            max_tokens: 최대 토큰 수
-            temperature: 온도
+            max_tokens: 최대 생성 토큰 수
+            temperature: 샘플링 온도 (0~2)
             top_p: Top-P 샘플링
-            
+            model_name: 사용할 모델명 (없으면 기본값 사용)
+
         Returns:
             생성된 텍스트
+
+        Raises:
+            RuntimeError: Ollama 서버 연결 실패 또는 생성 오류
         """
-        if not TRANSFORMERS_AVAILABLE:
-            raise RuntimeError('transformers 패키지가 필요합니다.')
+        model = model_name or self.model_name
 
-        local_only = os.getenv('HF_LOCAL_FILES_ONLY', '0').lower() in ('1', 'true', 'yes')
-        if os.getenv('HUGGINGFACE_HUB_DISABLE_SSL_VERIFY', '0').lower() in ('1', 'true', 'yes'):
-            os.environ['HUGGINGFACE_HUB_DISABLE_SSL_VERIFY'] = '1'
-
-        model_kwargs = {
-            'local_files_only': local_only,
-            'device_map': 'auto',
-            'torch_dtype': 'auto',
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "num_predict": max_tokens,
+                "temperature": temperature,
+                "top_p": top_p,
+            },
         }
 
         try:
-            from transformers import pipeline
-            
-            # DialoGPT 모델용 파이프라인
-            if 'DialoGPT' in self.model_name:
-                generator = pipeline('text-generation', model=self.model_name, **model_kwargs)
-                result = generator(prompt, max_length=max_tokens, temperature=temperature, do_sample=True, pad_token_id=50256)
-                return result[0]['generated_text']
-            else:
-                # 일반 텍스트 생성 모델
-                generator = pipeline('text-generation', model=self.model_name, **model_kwargs)
-                result = generator(prompt, max_new_tokens=max_tokens, temperature=temperature, top_p=top_p, do_sample=True)
-                return result[0]['generated_text']
-                
-        except Exception as exc:
-            raise RuntimeError(f'Transformers 생성 실패: {exc}')
-
-    def _generate_from_ollama(self, prompt: str, max_tokens: int, temperature: float, top_p: float) -> str:
-        """Ollama CLI를 통한 텍스트 생성
-        
-        Args:
-            prompt: 입력 프롬프트
-            max_tokens: 최대 토큰 수
-            temperature: 온도 (다양성)
-            top_p: Top-P 샘플링
-            
-        Returns:
-            생성된 텍스트
-            
-        Raises:
-            RuntimeError: Ollama CLI 실행 실패 시
-        """
-        if not OLLAMA_AVAILABLE:
-            raise RuntimeError('Ollama CLI가 설치되어 있지 않습니다.')
-
-        command = [
-            'ollama',
-            'run',
-            self.model_name,
-            prompt,
-            '--format',
-            'json',
-        ]
-        
-        try:
-            process = subprocess.run(
-                command, 
-                capture_output=True, 
-                text=True, 
-                encoding='utf-8', 
-                errors='replace',
-                timeout=120
+            resp = requests.post(
+                f"{OLLAMA_BASE_URL}/api/generate",
+                json=payload,
+                timeout=120,
             )
-            
-            if process.returncode != 0:
-                error_msg = process.stderr or 'Ollama CLI 실행 실패'
-                raise RuntimeError(f'Ollama 오류: {error_msg}')
+            resp.raise_for_status()
+            data = resp.json()
+            text = data.get("response", "").strip()
+            if not text:
+                raise RuntimeError("Ollama가 빈 응답을 반환했습니다.")
+            return text
 
-            try:
-                data = json.loads(process.stdout)
-                if isinstance(data, dict) and 'response' in data:
-                    return data['response']
-                return process.stdout.strip()
-            except json.JSONDecodeError:
-                return process.stdout.strip()
-                
-        except subprocess.TimeoutExpired:
-            raise RuntimeError('Ollama 실행 시간 초과 (120초)')
+        except requests.exceptions.ConnectionError:
+            raise RuntimeError(
+                f"Ollama 서버에 연결할 수 없습니다 ({OLLAMA_BASE_URL}). "
+                "로컬에서는 'ollama serve'를 실행하거나, "
+                "OLLAMA_BASE_URL 환경변수로 외부 서버를 지정하세요."
+            )
+        except requests.exceptions.Timeout:
+            raise RuntimeError("Ollama 응답 시간 초과 (120초). 모델이 너무 크거나 서버가 느립니다.")
+        except requests.exceptions.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else "unknown"
+            raise RuntimeError(f"Ollama HTTP 오류 {status}: {exc}")
         except Exception as exc:
-            raise RuntimeError(f'Ollama 실행 중 오류: {exc}')
-
-    def _generate_from_cli(self, prompt: str, max_tokens: int, temperature: float, top_p: float) -> str:
-        command = [
-            sys.executable,
-            '-m',
-            'vllm',
-            '--model',
-            self.model_name,
-            '--prompt',
-            prompt,
-            '--max_tokens',
-            str(max_tokens),
-            '--temperature',
-            str(temperature),
-            '--top_p',
-            str(top_p),
-        ]
-        process = subprocess.run(command, capture_output=True, text=True)
-        if process.returncode != 0:
-            raise RuntimeError(process.stderr or 'vLLM CLI 실행 실패')
-        return process.stdout.strip()
+            raise RuntimeError(f"텍스트 생성 실패: {exc}")

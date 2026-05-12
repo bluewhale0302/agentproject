@@ -8,9 +8,17 @@ venv/
 .venv/
 env/
 ENV/
+.env
+.env.*
 *.env
 *.env.*
+# 예시 파일은 커밋 허용
+!.env.example
+!*.env.example
 .pytest_cache/
+
+# Secrets - never commit
+webapp/backend/.env
 
 # Node
 node_modules/
