@@ -112,12 +112,17 @@ export default function Home() {
         }),
       ]);
 
+      // 에러 응답도 JSON으로 파싱해서 detail 메시지 표시
       const userData = await userRes.json();
       const gamesData = await gamesRes.json();
 
+      if (!userRes.ok) {
+        setSteamError(userData.detail ?? userData.error ?? `서버 오류 (${userRes.status})`);
+        return;
+      }
       if (userData.error) { setSteamError(userData.error); return; }
       setUser(userData);
-      if (!gamesData.error) setGames(gamesData);
+      if (gamesRes.ok && !gamesData.error) setGames(gamesData);
 
       // 조회 성공 시 고스야 인사
       setMessages((prev) => [
@@ -162,7 +167,12 @@ export default function Home() {
         body: JSON.stringify({ prompt: fullPrompt, max_tokens: 512, temperature: 0.85 }),
       });
       const data = await res.json();
-      const reply = data.text ?? data.detail ?? data.error ?? '응답을 받지 못했어요.';
+      if (!res.ok) {
+        const errMsg = data.detail ?? data.error ?? `서버 오류 (${res.status})`;
+        setMessages((prev) => [...prev, { role: 'gosya', content: `오류: ${errMsg}` }]);
+        return;
+      }
+      const reply = data.text ?? '응답을 받지 못했어요.';
       setMessages((prev) => [...prev, { role: 'gosya', content: reply }]);
     } catch (e) {
       setMessages((prev) => [
