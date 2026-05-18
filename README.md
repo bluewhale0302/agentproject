@@ -1,78 +1,117 @@
-﻿# 🎮 Game Play Assistant
+﻿# 🎮 게임 플레이 어시스턴트
 
-간단하고 빠르게 볼 수 있는 프로젝트 요약입니다.
+Steam 계정 정보를 불러오고, AI 고스야와 게임 이야기를 나눌 수 있는 웹 서비스입니다.
 
-## 핵심 기능
-- AI 텍스트 생성
-- 벡터 검색
-- Steam 사용자/게임 정보 조회
-- Riot Games 소환사/랭크 정보 조회
+**라이브**: [agentproject.vercel.app](https://agentproject.vercel.app)
 
-## 구조
+---
+
+## 주요 기능
+
+- **Steam 계정 조회** — Steam ID로 프로필, 온라인 상태, 게임 라이브러리(플레이타임 순) 확인
+- **고스야 AI 채팅** — Steam 정보를 바탕으로 게임 추천, 플레이 분석 등 맞춤형 대화
+- **Groq 기반 LLM** — qwen2.5 / llama3 / mixtral 등 무료 고속 모델 사용
+
+---
+
+## 기술 스택
+
+| 영역 | 기술 |
+|------|------|
+| 프론트엔드 | Next.js 14, React 18, Tailwind CSS, TypeScript |
+| 백엔드 | FastAPI, Python 3.12 |
+| AI | Groq API (OpenAI 호환, qwen2.5-coder-7b-instruct) |
+| 게임 API | Steam Web API |
+| 배포 | Vercel |
+
+---
+
+## 프로젝트 구조
+
 ```
-archive/
+agentproject/
 ├── webapp/
-│   ├── backend/          # FastAPI 백엔드
-│   │   ├── main.py
-│   │   ├── requirements.txt
-│   │   ├── .env.example
-│   │   └── ...
-│   └── frontend/         # Next.js 프론트엔드
-│       ├── app/page.tsx
-│       ├── package.json
-│       └── ...
-└── README.md
+│   ├── frontend/          # Next.js 앱
+│   │   └── app/
+│   │       ├── page.tsx   # 메인 페이지 (Steam 조회 + 고스야 채팅)
+│   │       ├── layout.tsx
+│   │       └── globals.css
+│   └── backend/
+│       ├── main.py        # FastAPI 앱 (단일 파일, Vercel 서버리스 호환)
+│       ├── requirements.txt
+│       └── .env.example
+└── vercel.json            # Vercel 배포 설정
 ```
 
-## 빠른 실행
+---
 
-### 1. 백엔드
-```powershell
+## 로컬 실행
+
+### 사전 준비
+
+- Python 3.12+
+- Node.js 18+
+- [Groq API 키](https://console.groq.com) (무료)
+- [Steam API 키](https://steamcommunity.com/dev/apikey) (무료)
+
+### 백엔드
+
+```bash
 cd webapp/backend
-python -m venv env
-env\Scripts\activate
+python -m venv .venv
+.venv\Scripts\activate        # Windows
+# source .venv/bin/activate   # macOS/Linux
+
 pip install -r requirements.txt
-python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
+
+# .env 파일 생성
+copy .env.example .env
+# .env에 GROQ_API_KEY, STEAM_API_KEY 입력
+
+uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-### 2. 프론트엔드
-```powershell
+### 프론트엔드
+
+```bash
 cd webapp/frontend
 npm install
 npm run dev
 ```
 
-### 접속 주소
-- 프론트: `http://127.0.0.1:3000`
-- API: `http://127.0.0.1:8000`
-- Swagger: `http://127.0.0.1:8000/docs`
+접속: [http://localhost:3000](http://localhost:3000)  
+API 문서: [http://localhost:8000/docs](http://localhost:8000/docs)
 
-## 환경 변수
-`webapp/backend/.env`에 기본 설정 추가:
-```env
-DEFAULT_MODEL=qwen2.5
-EMBEDDING_MODEL=all-MiniLM-L6-v2
-CHROMA_PERSIST_DIR=./chroma_store
-STEAM_API_KEY=
-RIOT_API_KEY=
-```
+---
 
-- `STEAM_API_KEY`, `RIOT_API_KEY`는 선택 사항
-- 키가 없으면 AI 생성 / 벡터 검색은 정상 작동
+## 환경변수
 
-## 중요 엔드포인트
+`webapp/backend/.env` 파일에 설정합니다.
+
+| 변수 | 설명 | 필수 |
+|------|------|------|
+| `GROQ_API_KEY` | Groq API 키 ([발급](https://console.groq.com)) | ✅ |
+| `STEAM_API_KEY` | Steam Web API 키 ([발급](https://steamcommunity.com/dev/apikey)) | ✅ |
+| `DEFAULT_MODEL` | 기본 AI 모델 (기본값: `qwen2.5`) | ❌ |
+| `CORS_ORIGINS` | 추가 허용 도메인 (쉼표 구분) | ❌ |
+
+Vercel 배포 시 **Settings → Environment Variables**에 동일하게 추가하세요.
+
+---
+
+## API 엔드포인트
+
 | 메서드 | 경로 | 설명 |
-|-------|------|------|
-| POST | `/api/generate` | AI 텍스트 생성 |
-| POST | `/api/search` | 벡터 검색 |
-| POST | `/api/games/steam/user` | Steam 사용자 정보 |
-| POST | `/api/games/steam/games` | Steam 게임 목록 |
-| POST | `/api/games/riot/summoner` | Riot 소환사 정보 |
-| POST | `/api/games/riot/ranked` | Riot 랭크 정보 |
-```
+|--------|------|------|
+| `GET` | `/` | 헬스체크 |
+| `POST` | `/api/generate` | AI 텍스트 생성 (고스야 채팅) |
+| `POST` | `/api/games/steam/user` | Steam 프로필 조회 |
+| `POST` | `/api/games/steam/games` | Steam 게임 목록 조회 |
 
-## 요약
-- 로컬 Ollama/LLM 기반 AI 생성
-- ChromaDB 벡터 검색
-- Steam / Riot API 통합
-- 빠르게 실행 가능한 Next.js + FastAPI 구조
+---
+
+## Vercel 배포
+
+1. GitHub 저장소를 Vercel에 연결
+2. **Settings → Environment Variables**에 `GROQ_API_KEY`, `STEAM_API_KEY` 추가
+3. Redeploy
