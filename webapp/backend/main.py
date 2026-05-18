@@ -1,161 +1,282 @@
-import os
+"""
+Game Play Assistant — FastAPI 백엔드
+모든 서비스를 단일 파일로 통합 (Vercel 서버리스 호환)
+"""
+
 import logging
+import os
+import uuid
+from typing import Any, Dict, List, Optional
+
+import requests
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from dotenv import load_dotenv
 
 load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title='Game Play Assistant', version='0.1.0')
+# ── FastAPI 앱 ────────────────────────────────────────────────────────────────
 
-_CORS_ORIGINS = [
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-]
-_extra = os.getenv('CORS_ORIGINS', '')
+app = FastAPI(title="Game Play Assistant", version="1.0.0")
+
+_cors_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+_extra = os.getenv("CORS_ORIGINS", "")
 if _extra:
-    _CORS_ORIGINS.extend([o.strip() for o in _extra.split(',') if o.strip()])
+    _cors_origins.extend([o.strip() for o in _extra.split(",") if o.strip()])
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_CORS_ORIGINS,
-    allow_origin_regex=r'https://.*\.vercel\.app',
-    allow_methods=['*'],
-    allow_headers=['*'],
+    allow_origins=_cors_origins,
+    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# ── 요청 모델 ──────────────────────────────────────────────────────────────────
+# ── 요청/응답 모델 ────────────────────────────────────────────────────────────
 
 class GenerateRequest(BaseModel):
     prompt: str
-    max_tokens: int = 256
+    max_tokens: int = 512
     temperature: float = 0.8
     top_p: float = 0.95
-    model: str | None = None
+    model: Optional[str] = None
 
 class GenerateResponse(BaseModel):
     text: str
 
-class SearchRequest(BaseModel):
-    query: str
-    top_k: int = 5
-
-class SearchResponse(BaseModel):
-    engine: str
-    matches: list[dict]
-
 class SteamRequest(BaseModel):
     steam_id: str
 
-# ── Lazy 싱글톤 (모듈 로드 시 초기화 안 함 → Vercel cold start 안전) ──────────
+# ── LLM 서비스 (Groq) ─────────────────────────────────────────────────────────
 
-_vllm_service = None
-_vector_store = None
-_game_service = None
+# Groq 모델 별칭 (짧은 이름 → 실제 모델명)
+_MODEL_ALIASES: Dict[str, str] = {
+    "qwen2.5":  "qwen2.5-coder-7b-instruct",
+    "qwen":     "qwen2.5-coder-7b-instruct",
+    "llama3":   "llama3-8b-8192",
+    "llama3.1": "llama-3.1-8b-instant",
+    "llama3.2": "llama-3.2-3b-preview",
+    "mixtral":  "mixtral-8x7b-32768",
+    "gemma":    "gemma2-9b-it",
+}
+_DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen2.5")
 
-def get_vllm_service():
-    global _vllm_service
-    if _vllm_service is None:
-        from services.vllm_service import VLLMService
-        _vllm_service = VLLMService(model_name=os.getenv('DEFAULT_MODEL', 'qwen2.5'))
-    return _vllm_service
 
-def get_vector_store():
-    global _vector_store
-    if _vector_store is None:
-        from services.vector_store import VectorStore
-        _vector_store = VectorStore(embedding_model=os.getenv('EMBEDDING_MODEL', 'all-MiniLM-L6-v2'))
-    return _vector_store
-
-def get_game_service():
-    global _game_service
-    if _game_service is None:
-        from services.game_service import GameService
-        _game_service = GameService()
-    return _game_service
-
-# ── 엔드포인트 ─────────────────────────────────────────────────────────────────
-
-@app.get('/')
-def root():
-    return {'message': 'Game Play Assistant API ready'}
-
-@app.post('/api/generate', response_model=GenerateResponse)
-def generate(request: GenerateRequest):
-    if not request.prompt or not request.prompt.strip():
-        raise HTTPException(status_code=400, detail='프롬프트가 비어있습니다.')
-    if request.max_tokens <= 0:
-        raise HTTPException(status_code=400, detail='max_tokens는 0보다 커야 합니다.')
-    if not (0 <= request.temperature <= 2):
-        raise HTTPException(status_code=400, detail='온도는 0~2 사이여야 합니다.')
-
-    try:
-        text = get_vllm_service().generate(
-            prompt=request.prompt,
-            max_tokens=request.max_tokens,
-            temperature=request.temperature,
-            top_p=request.top_p,
-            model_name=request.model,
+def _groq_generate(
+    prompt: str,
+    max_tokens: int = 512,
+    temperature: float = 0.8,
+    top_p: float = 0.95,
+    model_name: Optional[str] = None,
+) -> str:
+    """Groq API로 텍스트 생성."""
+    api_key = os.getenv("GROQ_API_KEY", "")
+    if not api_key:
+        raise RuntimeError(
+            "GROQ_API_KEY가 설정되지 않았습니다. "
+            "Vercel 환경변수에 GROQ_API_KEY를 추가하세요. "
+            "키 발급: https://console.groq.com"
         )
-        if not text or not str(text).strip():
-            raise HTTPException(status_code=500, detail='모델이 빈 응답을 반환했습니다.')
-        return {'text': text}
+
+    raw_model = model_name or _DEFAULT_MODEL
+    model = _MODEL_ALIASES.get(raw_model.lower(), raw_model)
+
+    try:
+        from openai import OpenAI  # openai 패키지로 Groq 호출
+    except ImportError:
+        raise RuntimeError("openai 패키지가 없습니다. requirements.txt를 확인하세요.")
+
+    client = OpenAI(api_key=api_key, base_url="https://api.groq.com/openai/v1")
+
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        if not text:
+            raise RuntimeError("Groq API가 빈 응답을 반환했습니다.")
+        return text
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        err = str(exc)
+        if "authentication" in err.lower() or "api_key" in err.lower():
+            raise RuntimeError(f"Groq 인증 실패 — API 키를 확인하세요: {exc}")
+        if "model" in err.lower() and "not found" in err.lower():
+            raise RuntimeError(
+                f"모델 '{model}'을 찾을 수 없습니다. "
+                f"지원 모델: {', '.join(set(_MODEL_ALIASES.values()))}"
+            )
+        raise RuntimeError(f"Groq 호출 실패: {exc}")
+
+
+# ── Steam 서비스 ──────────────────────────────────────────────────────────────
+
+def _steam_get_user(steam_id: str) -> Dict[str, Any]:
+    """Steam 사용자 프로필 조회."""
+    api_key = os.getenv("STEAM_API_KEY", "")
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="STEAM_API_KEY가 설정되지 않았습니다. Vercel 환경변수에 추가하세요.",
+        )
+
+    resp = requests.get(
+        "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/",
+        params={"key": api_key, "steamids": steam_id, "format": "json"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    players = resp.json().get("response", {}).get("players", [])
+    if not players:
+        raise HTTPException(status_code=404, detail="Steam 사용자를 찾을 수 없습니다.")
+
+    p = players[0]
+    return {
+        "steam_id":     steam_id,
+        "username":     p.get("personaname", ""),
+        "avatar":       p.get("avatarfull", ""),
+        "profile_url":  p.get("profileurl", ""),
+        "real_name":    p.get("realname", ""),
+        "location":     p.get("loccountrycode", ""),
+        "persona_state": p.get("personastate", 0),
+        "last_logoff":  p.get("lastlogoff", 0),
+    }
+
+
+def _steam_get_games(steam_id: str) -> Dict[str, Any]:
+    """Steam 게임 목록 조회."""
+    api_key = os.getenv("STEAM_API_KEY", "")
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="STEAM_API_KEY가 설정되지 않았습니다. Vercel 환경변수에 추가하세요.",
+        )
+
+    resp = requests.get(
+        "https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/",
+        params={
+            "key": api_key,
+            "steamid": steam_id,
+            "include_appinfo": 1,
+            "include_played_free_games": 1,
+            "format": "json",
+        },
+        timeout=10,
+    )
+    resp.raise_for_status()
+    games = resp.json().get("response", {}).get("games", [])
+
+    # 플레이타임 내림차순 정렬
+    games_sorted = sorted(games, key=lambda g: g.get("playtime_forever", 0), reverse=True)
+
+    return {
+        "steam_id":    steam_id,
+        "total_games": len(games),
+        "games":       games_sorted[:20],
+    }
+
+
+# ── In-memory 벡터 스토어 ─────────────────────────────────────────────────────
+
+_documents: List[Dict[str, Any]] = []
+
+
+def _memory_search(query: str, top_k: int = 5) -> Dict[str, Any]:
+    if not _documents:
+        return {"engine": "memory", "matches": []}
+    q_words = set(query.lower().split())
+    scored = []
+    for doc in _documents:
+        d_words = set(doc["text"].lower().split())
+        union = len(q_words | d_words)
+        score = len(q_words & d_words) / union if union else 0.0
+        scored.append({**doc, "score": round(score, 4)})
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    return {"engine": "memory", "matches": scored[:top_k]}
+
+
+# ── 엔드포인트 ────────────────────────────────────────────────────────────────
+
+@app.get("/")
+def root():
+    return {"status": "ok", "message": "Game Play Assistant API"}
+
+
+@app.post("/api/generate", response_model=GenerateResponse)
+def generate(req: GenerateRequest):
+    if not req.prompt.strip():
+        raise HTTPException(status_code=400, detail="프롬프트가 비어있습니다.")
+    if req.max_tokens <= 0:
+        raise HTTPException(status_code=400, detail="max_tokens는 0보다 커야 합니다.")
+    if not (0.0 <= req.temperature <= 2.0):
+        raise HTTPException(status_code=400, detail="temperature는 0~2 사이여야 합니다.")
+    try:
+        text = _groq_generate(
+            prompt=req.prompt,
+            max_tokens=req.max_tokens,
+            temperature=req.temperature,
+            top_p=req.top_p,
+            model_name=req.model,
+        )
+        return {"text": text}
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f'텍스트 생성 오류: {exc}')
+        logger.error(f"텍스트 생성 오류: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
 
-@app.post('/api/search', response_model=SearchResponse)
-def search(request: SearchRequest):
-    if not request.query or not request.query.strip():
-        raise HTTPException(status_code=400, detail='검색어가 비어있습니다.')
-    if not (0 < request.top_k <= 100):
-        raise HTTPException(status_code=400, detail='top_k는 1~100 사이여야 합니다.')
-    try:
-        return get_vector_store().query(request.query, top_k=request.top_k)
-    except Exception as exc:
-        logger.error(f'벡터 검색 오류: {exc}')
-        raise HTTPException(status_code=500, detail=str(exc))
 
-@app.post('/api/games/steam/user')
-def get_steam_user(request: SteamRequest):
-    if not request.steam_id or not request.steam_id.strip():
-        raise HTTPException(status_code=400, detail='Steam ID가 필요합니다.')
+@app.post("/api/games/steam/user")
+def steam_user(req: SteamRequest):
+    if not req.steam_id.strip():
+        raise HTTPException(status_code=400, detail="Steam ID가 필요합니다.")
     try:
-        result = get_game_service().get_steam_user_info(request.steam_id.strip())
-        # game_service가 error 딕셔너리를 반환하면 400으로 올려줌
-        if isinstance(result, dict) and 'error' in result:
-            raise HTTPException(status_code=400, detail=result['error'])
-        return result
+        return _steam_get_user(req.steam_id.strip())
     except HTTPException:
         raise
+    except requests.exceptions.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else 500
+        raise HTTPException(status_code=status, detail=f"Steam API 오류: {exc}")
     except Exception as exc:
-        logger.error(f'Steam 사용자 조회 오류: {exc}')
+        logger.error(f"Steam 사용자 조회 오류: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
 
-@app.post('/api/games/steam/games')
-def get_steam_games(request: SteamRequest):
-    if not request.steam_id or not request.steam_id.strip():
-        raise HTTPException(status_code=400, detail='Steam ID가 필요합니다.')
+
+@app.post("/api/games/steam/games")
+def steam_games(req: SteamRequest):
+    if not req.steam_id.strip():
+        raise HTTPException(status_code=400, detail="Steam ID가 필요합니다.")
     try:
-        result = get_game_service().get_steam_games(request.steam_id.strip())
-        if isinstance(result, dict) and 'error' in result:
-            raise HTTPException(status_code=400, detail=result['error'])
-        return result
+        return _steam_get_games(req.steam_id.strip())
     except HTTPException:
         raise
+    except requests.exceptions.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else 500
+        raise HTTPException(status_code=status, detail=f"Steam API 오류: {exc}")
     except Exception as exc:
-        logger.error(f'Steam 게임 조회 오류: {exc}')
+        logger.error(f"Steam 게임 조회 오류: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
 
-if __name__ == '__main__':
+
+@app.post("/api/search")
+def search(query: str, top_k: int = 5):
+    if not query.strip():
+        raise HTTPException(status_code=400, detail="검색어가 비어있습니다.")
+    return _memory_search(query.strip(), top_k=min(top_k, 100))
+
+
+if __name__ == "__main__":
     import uvicorn
-    uvicorn.run('main:app', host='0.0.0.0', port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
