@@ -63,23 +63,14 @@ export default function Home() {
           </div>
         )}
 
-        {/* 게임 플랫폼 바로가기 */}
-        <div className="grid grid-cols-2 gap-4">
-          <Link href="/steam"
-            className="group rounded-2xl border border-blue-800/50 bg-blue-950/30 p-6 hover:bg-blue-950/60 hover:border-blue-600 transition-all">
-            <div className="text-3xl mb-3">🎮</div>
-            <h2 className="text-xl font-bold text-blue-300 group-hover:text-blue-200">Steam</h2>
-            <p className="mt-1 text-slate-400 text-sm">프로필 · 게임 라이브러리 조회</p>
-            <p className="mt-3 text-blue-500 text-sm group-hover:text-blue-400">바로가기 →</p>
-          </Link>
-          <Link href="/riot"
-            className="group rounded-2xl border border-purple-800/50 bg-purple-950/30 p-6 hover:bg-purple-950/60 hover:border-purple-600 transition-all">
-            <div className="text-3xl mb-3">⚔️</div>
-            <h2 className="text-xl font-bold text-purple-300 group-hover:text-purple-200">Riot Games</h2>
-            <p className="mt-1 text-slate-400 text-sm">소환사 정보 · 랭크 통계 조회</p>
-            <p className="mt-3 text-purple-500 text-sm group-hover:text-purple-400">바로가기 →</p>
-          </Link>
-        </div>
+        {/* Steam 바로가기 */}
+        <Link href="/steam"
+          className="group rounded-2xl border border-blue-800/50 bg-blue-950/30 p-6 hover:bg-blue-950/60 hover:border-blue-600 transition-all">
+          <div className="text-3xl mb-3">🎮</div>
+          <h2 className="text-xl font-bold text-blue-300 group-hover:text-blue-200">Steam</h2>
+          <p className="mt-1 text-slate-400 text-sm">프로필 · 게임 라이브러리 조회</p>
+          <p className="mt-3 text-blue-500 text-sm group-hover:text-blue-400">바로가기 →</p>
+        </Link>
 
         {/* AI 텍스트 생성 */}
         <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 space-y-4">
