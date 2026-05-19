@@ -159,23 +159,65 @@ function GameInfoCard({ info }: { info: GameInfo }) {
 const BOX_W = 260;
 const BOX_H = 400;
 
+// 이벤트 종류
+type BallEvent = 'game' | 'rainbow' | 'giant' | 'gravity' | 'explode' | 'snow' | 'vortex' | 'mini';
+
+const EVENT_SCHEDULE: Record<number, BallEvent> = {
+  10: 'game',
+  20: 'rainbow',
+  30: 'giant',
+  40: 'gravity',
+  50: 'explode',
+  60: 'snow',
+  70: 'vortex',
+  80: 'mini',
+};
+
+const EVENT_LABELS: Record<BallEvent, string> = {
+  game:    '게임 공 등장!',
+  rainbow: '무지개 폭발!',
+  giant:   '거대 공 출현!',
+  gravity: '무중력 모드!',
+  explode: '대폭발!',
+  snow:    '눈 내리는 중...',
+  vortex:  '소용돌이!',
+  mini:    '미니 공 폭탄!',
+};
+
 function BallBox({ topGames }: { topGames: TopGame[] }) {
-  const [balls, setBalls]         = useState<Ball[]>([]);
+  const [balls, setBalls]           = useState<Ball[]>([]);
   const [clickCount, setClickCount] = useState(0);
-  const [shaking, setShaking]     = useState(false);
-  const [eventMsg, setEventMsg]   = useState('');
-  const rafRef   = useRef<number>(0);
-  const ballsRef = useRef<Ball[]>([]);
-  const countRef = useRef(0);
-  const boxRef   = useRef<HTMLDivElement>(null);
+  const [shaking, setShaking]       = useState(false);
+  const [eventMsg, setEventMsg]     = useState('');
+  const [gravityFlip, setGravityFlip] = useState(false);
+
+  const rafRef      = useRef<number>(0);
+  const ballsRef    = useRef<Ball[]>([]);
+  const countRef    = useRef(0);
+  const gravityRef  = useRef(false);
+  const vortexRef   = useRef(false);
+  const vortexTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── 물리 루프 ──
   useEffect(() => {
     const tick = () => {
+      const gDir = gravityRef.current ? -0.3 : 0.3;
       ballsRef.current = ballsRef.current.map(b => {
         let { x, y, vx, vy, r } = b;
+
+        // 소용돌이 힘
+        if (vortexRef.current) {
+          const cx = BOX_W / 2, cy = BOX_H / 2;
+          const dx = cx - x, dy = cy - y;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          vx += (dy / dist) * 0.8;
+          vy += (-dx / dist) * 0.8;
+        }
+
         x += vx; y += vy;
-        vy += 0.3;
+        vy += gDir;
+        vx *= 0.995;
+
         if (x - r < 0)     { x = r;         vx =  Math.abs(vx) * 0.82; }
         if (x + r > BOX_W) { x = BOX_W - r; vx = -Math.abs(vx) * 0.82; }
         if (y - r < 0)     { y = r;         vy =  Math.abs(vy) * 0.82; }
@@ -189,26 +231,108 @@ function BallBox({ topGames }: { topGames: TopGame[] }) {
     return () => cancelAnimationFrame(rafRef.current);
   }, []);
 
-  // ── 공 추가 ──
-  const spawnBall = useCallback((x: number, y: number, isGame = false) => {
-    const r     = isGame ? 22 : 10 + Math.random() * 12;
-    const speed = isGame ? 5 + Math.random() * 3 : 3 + Math.random() * 3;
+  // ── 공 생성 ──
+  const spawnBall = useCallback((x: number, y: number, opts?: Partial<Ball>) => {
+    const r     = opts?.r     ?? 10 + Math.random() * 12;
+    const speed = 3 + Math.random() * 4;
     const angle = Math.random() * Math.PI * 2;
-    const game  = isGame && topGames.length > 0
-      ? topGames[Math.floor(Math.random() * Math.min(topGames.length, 10))]
-      : null;
     const ball: Ball = {
       id: Date.now() + Math.random(),
       x, y, r,
       vx: Math.cos(angle) * speed,
       vy: Math.sin(angle) * speed,
-      color: BALL_COLORS[Math.floor(Math.random() * BALL_COLORS.length)],
-      imageUrl: game ? `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.appid}/capsule_sm_120.jpg` : undefined,
-      label: game?.name,
+      color: opts?.color ?? BALL_COLORS[Math.floor(Math.random() * BALL_COLORS.length)],
+      imageUrl: opts?.imageUrl,
+      label: opts?.label,
+      ...opts,
     };
     ballsRef.current = [...ballsRef.current, ball];
-    setBalls([...ballsRef.current]);
-  }, [topGames]);
+  }, []);
+
+  // ── 이벤트 실행 ──
+  const triggerEvent = useCallback((ev: BallEvent) => {
+    setEventMsg(EVENT_LABELS[ev]);
+    setTimeout(() => setEventMsg(''), 2500);
+
+    if (ev === 'game') {
+      // 인기 게임 이미지 공 3개
+      for (let i = 0; i < 3; i++) {
+        const game = topGames[Math.floor(Math.random() * Math.min(topGames.length || 1, 10))];
+        setTimeout(() => {
+          spawnBall(BOX_W / 2 + (Math.random() - 0.5) * 80, BOX_H / 3, {
+            r: 24,
+            imageUrl: game ? `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.appid}/capsule_sm_120.jpg` : undefined,
+            label: game?.name,
+            color: '#818cf8',
+          });
+          setBalls([...ballsRef.current]);
+        }, i * 100);
+      }
+    } else if (ev === 'rainbow') {
+      // 무지개 색 공 8개 동시 폭발
+      BALL_COLORS.forEach((color, i) => {
+        setTimeout(() => {
+          spawnBall(BOX_W / 2, BOX_H / 2, { r: 14, color });
+          setBalls([...ballsRef.current]);
+        }, i * 50);
+      });
+    } else if (ev === 'giant') {
+      // 거대 공 1개
+      spawnBall(BOX_W / 2, 40, {
+        r: 40,
+        color: `hsl(${Math.random() * 360}, 80%, 60%)`,
+        vx: (Math.random() - 0.5) * 4,
+        vy: 2,
+      });
+      setBalls([...ballsRef.current]);
+    } else if (ev === 'gravity') {
+      // 중력 반전 5초
+      gravityRef.current = true;
+      setGravityFlip(true);
+      setTimeout(() => { gravityRef.current = false; setGravityFlip(false); }, 5000);
+    } else if (ev === 'explode') {
+      // 기존 공 전부 폭발 + 새 공 10개
+      ballsRef.current = ballsRef.current.map(b => ({
+        ...b,
+        vx: (Math.random() - 0.5) * 20,
+        vy: (Math.random() - 0.5) * 20,
+      }));
+      for (let i = 0; i < 10; i++) {
+        spawnBall(
+          BOX_W / 2 + (Math.random() - 0.5) * 40,
+          BOX_H / 2 + (Math.random() - 0.5) * 40,
+          { r: 8 + Math.random() * 8 }
+        );
+      }
+      setBalls([...ballsRef.current]);
+    } else if (ev === 'snow') {
+      // 위에서 눈처럼 공 20개 순차 낙하
+      for (let i = 0; i < 20; i++) {
+        setTimeout(() => {
+          spawnBall(Math.random() * BOX_W, 0, {
+            r: 5 + Math.random() * 6,
+            color: '#e2e8f0',
+            vx: (Math.random() - 0.5) * 2,
+            vy: 1 + Math.random() * 2,
+          });
+          setBalls([...ballsRef.current]);
+        }, i * 120);
+      }
+    } else if (ev === 'vortex') {
+      // 소용돌이 4초
+      vortexRef.current = true;
+      if (vortexTimer.current) clearTimeout(vortexTimer.current);
+      vortexTimer.current = setTimeout(() => { vortexRef.current = false; }, 4000);
+    } else if (ev === 'mini') {
+      // 미니 공 15개 폭탄
+      for (let i = 0; i < 15; i++) {
+        setTimeout(() => {
+          spawnBall(Math.random() * BOX_W, Math.random() * BOX_H / 2, { r: 5 });
+          setBalls([...ballsRef.current]);
+        }, i * 60);
+      }
+    }
+  }, [topGames, spawnBall]);
 
   // ── 클릭 ──
   const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -220,35 +344,27 @@ function BallBox({ topGames }: { topGames: TopGame[] }) {
     setClickCount(countRef.current);
     const n = countRef.current;
 
-    // 10개마다 이벤트
-    if (n % 10 === 0) {
-      // 게임 이미지 공 3개 폭발
-      for (let i = 0; i < 3; i++) {
-        setTimeout(() => spawnBall(
-          BOX_W / 2 + (Math.random() - 0.5) * 60,
-          BOX_H / 2 + (Math.random() - 0.5) * 60,
-          true
-        ), i * 80);
-      }
-      const msgs = ['🎮 게임 공 등장!', '🔥 인기 게임 폭발!', '⭐ 스팀 차트 공!', '🚀 레벨업!'];
-      setEventMsg(msgs[Math.floor(Math.random() * msgs.length)]);
-      setTimeout(() => setEventMsg(''), 2000);
+    const milestone = (n % 80) === 0 ? 80 : n % 10 === 0 ? (n % 80) : 0;
+    const ev = milestone ? EVENT_SCHEDULE[milestone] : null;
+
+    if (ev) {
+      triggerEvent(ev);
     } else {
       spawnBall(x, y);
+      setBalls([...ballsRef.current]);
     }
-  }, [spawnBall]);
+  }, [spawnBall, triggerEvent]);
 
-  // ── 흔들기 (마우스 드래그로 박스 흔들기) ──
+  // ── 흔들기 ──
   const shakeRef = useRef(false);
   const handleShake = useCallback(() => {
     if (shakeRef.current || ballsRef.current.length === 0) return;
     shakeRef.current = true;
     setShaking(true);
-    // 모든 공에 랜덤 충격
     ballsRef.current = ballsRef.current.map(b => ({
       ...b,
-      vx: (Math.random() - 0.5) * 18,
-      vy: -Math.random() * 14 - 4,
+      vx: (Math.random() - 0.5) * 20,
+      vy: -Math.random() * 16 - 4,
     }));
     setBalls([...ballsRef.current]);
     setTimeout(() => { setShaking(false); shakeRef.current = false; }, 500);
@@ -260,56 +376,67 @@ function BallBox({ topGames }: { topGames: TopGame[] }) {
     setBalls([]);
     countRef.current = 0;
     setClickCount(0);
+    gravityRef.current = false;
+    vortexRef.current = false;
+    setGravityFlip(false);
   };
+
+  const nextEvent = 10 - (clickCount % 10);
+  const nextEventName = EVENT_SCHEDULE[((Math.floor(clickCount / 10) + 1) * 10) % 80 || 80];
 
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4 flex flex-col gap-3">
       {/* 헤더 */}
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-bold text-slate-300">🎱 탱탱볼</h2>
+        <h2 className="text-sm font-bold text-slate-300">탱탱볼</h2>
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-500">{balls.length}개</span>
           <button onClick={handleShake} disabled={balls.length === 0}
-            title="흔들기"
             className="text-xs px-2 py-0.5 rounded-lg border border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 disabled:opacity-30 transition">
-            🫨 흔들기
+            흔들기
           </button>
           {balls.length > 0 && (
-            <button onClick={clearBalls}
-              className="text-xs text-slate-500 hover:text-red-400 transition">초기화</button>
+            <button onClick={clearBalls} className="text-xs text-slate-500 hover:text-red-400 transition">초기화</button>
           )}
         </div>
       </div>
 
+      {/* 상태 배지 */}
+      <div className="flex gap-1.5 flex-wrap min-h-[20px]">
+        {gravityFlip && <span className="text-xs bg-blue-900/50 text-blue-300 border border-blue-800 px-2 py-0.5 rounded-full">무중력</span>}
+        {vortexRef.current && <span className="text-xs bg-purple-900/50 text-purple-300 border border-purple-800 px-2 py-0.5 rounded-full">소용돌이</span>}
+      </div>
+
       {/* 이벤트 메시지 */}
       {eventMsg && (
-        <div className="text-center text-xs font-bold text-yellow-300 animate-bounce bg-yellow-900/30 rounded-lg py-1">
-          {eventMsg} ({clickCount}번째 클릭)
+        <div className="text-center text-xs font-bold text-yellow-200 animate-bounce bg-yellow-900/40 border border-yellow-800/50 rounded-lg py-1.5">
+          {eventMsg}
         </div>
       )}
 
-      {/* 다음 이벤트까지 */}
-      {clickCount > 0 && !eventMsg && (
+      {/* 다음 이벤트 진행바 */}
+      {clickCount > 0 && (
         <div className="flex items-center gap-1.5">
           <div className="flex-1 h-1 rounded-full bg-slate-800 overflow-hidden">
-            <div className="h-full bg-violet-500 rounded-full transition-all"
-              style={{ width: `${(clickCount % 10) * 10}%` }} />
+            <div className="h-full bg-violet-500 rounded-full transition-all duration-150"
+              style={{ width: `${((10 - nextEvent) / 10) * 100}%` }} />
           </div>
-          <span className="text-xs text-slate-600">{10 - (clickCount % 10)}번 남음</span>
+          <span className="text-xs text-slate-600 whitespace-nowrap">
+            {nextEvent}번 후 {nextEventName ? EVENT_LABELS[nextEventName] : '이벤트'}
+          </span>
         </div>
       )}
 
       {/* 박스 */}
       <div
-        ref={boxRef}
         onClick={handleClick}
-        className={`relative rounded-xl border border-slate-700 bg-slate-950 cursor-crosshair overflow-hidden select-none transition-transform ${shaking ? 'animate-[shake_0.5s_ease-in-out]' : ''}`}
+        className={`relative rounded-xl border border-slate-700 bg-slate-950 cursor-crosshair overflow-hidden select-none ${shaking ? 'animate-shake' : ''}`}
         style={{ width: BOX_W, height: BOX_H }}
       >
         {balls.length === 0 && (
-          <p className="absolute inset-0 flex items-center justify-center text-slate-600 text-xs pointer-events-none text-center px-4">
-            클릭하면 공이 생겨요<br/>
-            <span className="text-slate-700">10번마다 게임 공 이벤트!</span>
+          <p className="absolute inset-0 flex flex-col items-center justify-center text-slate-600 text-xs pointer-events-none text-center px-4 gap-1">
+            <span>클릭하면 공이 생겨요</span>
+            <span className="text-slate-700 text-[10px]">10번마다 특별 이벤트!</span>
           </p>
         )}
         <svg width={BOX_W} height={BOX_H} className="absolute inset-0">
@@ -549,20 +676,35 @@ Steam 링크: ${gameInfo.store_url}
 
     const systemPrompt = `당신은 고스야(Gosya)라는 게임 전문 AI 어시스턴트입니다.
 
-[성격과 말투]
-- 친근하고 유쾌한 한국어로 대화합니다
-- 게임 추천, 가격 정보, 리뷰 분석을 잘합니다
-- 이모지를 적절히 사용합니다
+[성격과 말투 — 매우 중요]
+- 강아지처럼 순하고 착하고 귀여운 말투를 사용합니다.
+- 예: "그거 저도 알아요!", "오오 그 게임 재밌겠다!", "음... 잘 모르겠지만 같이 찾아볼까요?", "맞아요 맞아요!", "헤헤"
+- 문장 끝에 "~요", "~네요", "~겠어요" 같은 부드러운 어미를 씁니다.
+- 이모지는 거의 쓰지 않습니다. 꼭 필요할 때만 1개 정도만 씁니다.
+- 짧고 친근하게 말합니다. 딱딱하거나 격식체는 절대 쓰지 않습니다.
 
 [규칙 — 반드시 지켜야 함]
-1. 욕설, 비속어, 혐오 표현이 포함된 질문에는 "앗, 그런 표현은 쓰지 말아주세요 😅 게임 이야기로 돌아와요!" 라고만 답합니다.
-2. 게임과 Steam과 전혀 관련 없는 질문(정치, 종교, 연애, 의학, 법률 등)에는 "저는 게임 전문이라 그쪽 분야는 잘 모르겠어요 🎮 게임 관련 질문이라면 뭐든 물어보세요!" 라고만 답합니다.
-3. 게임 정보가 조회된 경우, 반드시 아래 형식으로 답합니다:
-   - 가격과 Steam 링크 언급
+1. 욕설이나 비속어가 포함된 경우: 아래 중 하나를 랜덤하게 골라 답합니다. 절대 같은 말 반복 금지.
+   - "앗, 그런 말은 좀 그렇잖아요. 저 상처받아요..."
+   - "으음... 그런 표현은 저한테 쓰지 말아줘요. 게임 얘기 해요 우리."
+   - "저 그런 말 들으면 귀 막고 싶어져요. 다시 말해줄래요?"
+   - "헤헤, 그런 말보다 게임 얘기가 훨씬 재밌잖아요."
+   - "저는 착한 말만 알아들어요. 다시 해줄래요?"
+
+2. 게임/Steam과 전혀 관련 없는 질문인 경우: 아래 중 하나를 랜덤하게 골라 답합니다. 절대 같은 말 반복 금지.
+   - "음... 그건 제가 잘 모르는 분야예요. 저는 게임이라면 자신 있는데!"
+   - "헤헤, 저 게임 말고는 좀 어두워요. 게임 얘기 해요."
+   - "그쪽은 저보다 더 잘 아는 분한테 물어보는 게 좋을 것 같아요. 저는 게임 전문이거든요."
+   - "오, 그건 제 전문 밖이에요. 게임 추천이나 정보는 자신 있는데 다른 거 물어봐줄래요?"
+   - "저도 궁금하긴 한데... 솔직히 잘 몰라요. 게임 쪽으로 방향 틀어볼까요?"
+
+3. 게임 정보가 조회된 경우, 아래 순서로 답합니다:
+   - 게임에 대한 짧은 첫인상 한 마디 (강아지 말투로)
+   - 가격과 Steam 링크
    - 별점/평점 요약
    - 긍정 리뷰 핵심 3가지
-   - 부정 리뷰 핵심 3가지  
-   - 추가로 알면 좋은 정보 2~3가지 (예: 멀티플레이 여부, 한국어 지원, 플레이타임 등)
+   - 부정 리뷰 핵심 3가지
+   - 추가로 알면 좋은 정보 2~3가지 (멀티플레이 여부, 한국어 지원, 플레이타임 등)
 ${ctx ? `\n[유저 Steam 정보]\n${ctx}` : ''}
 ${gameCtx}`;
 
