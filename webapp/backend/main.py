@@ -270,7 +270,30 @@ def steam_games(req: SteamRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@app.post("/api/search")
+@app.get("/api/games/steam/top")
+def steam_top_games():
+    """Steam 글로벌 인기 게임 순위 (SteamSpy 무료 API 사용, 키 불필요)."""
+    try:
+        resp = requests.get(
+            "https://steamspy.com/api.php",
+            params={"request": "top100in2weeks"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        games = []
+        for rank, (appid, info) in enumerate(list(data.items())[:20], start=1):
+            games.append({
+                "rank":    rank,
+                "appid":   int(appid),
+                "name":    info.get("name", ""),
+                "players": info.get("ccu", 0),          # 현재 동시접속자
+                "owners":  info.get("owners", ""),
+            })
+        return {"games": games}
+    except Exception as exc:
+        logger.error(f"Steam 인기 게임 조회 오류: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
 def search(query: str, top_k: int = 5):
     if not query.strip():
         raise HTTPException(status_code=400, detail="검색어가 비어있습니다.")
