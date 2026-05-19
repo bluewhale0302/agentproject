@@ -292,12 +292,130 @@ def steam_top_games():
                 "rank":    rank,
                 "appid":   int(appid),
                 "name":    info.get("name", ""),
-                "players": info.get("ccu", 0),          # 현재 동시접속자
+                "players": info.get("ccu", 0),
                 "owners":  info.get("owners", ""),
             })
         return {"games": games}
     except Exception as exc:
         logger.error(f"Steam 인기 게임 조회 오류: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+class GameSearchRequest(BaseModel):
+    name: str
+
+
+@app.post("/api/games/steam/search")
+def steam_search_game(req: GameSearchRequest):
+    """게임 이름으로 Steam 게임 검색 후 상세 정보 반환."""
+    if not req.name.strip():
+        raise HTTPException(status_code=400, detail="게임 이름이 필요합니다.")
+
+    try:
+        # 1) 게임 검색
+        search_resp = requests.get(
+            "https://store.steampowered.com/api/storesearch/",
+            params={"term": req.name.strip(), "l": "korean", "cc": "KR"},
+            timeout=10,
+        )
+        search_resp.raise_for_status()
+        items = search_resp.json().get("items", [])
+        if not items:
+            raise HTTPException(status_code=404, detail=f"'{req.name}' 게임을 찾을 수 없습니다.")
+
+        appid = items[0]["id"]
+
+        # 2) 상세 정보
+        detail_resp = requests.get(
+            "https://store.steampowered.com/api/appdetails",
+            params={"appids": appid, "l": "korean", "cc": "KR"},
+            timeout=10,
+        )
+        detail_resp.raise_for_status()
+        detail_data = detail_resp.json().get(str(appid), {})
+        if not detail_data.get("success"):
+            raise HTTPException(status_code=404, detail="게임 상세 정보를 가져올 수 없습니다.")
+
+        d = detail_data["data"]
+
+        # 가격
+        price_info = d.get("price_overview", {})
+        if price_info:
+            price = price_info.get("final_formatted", "가격 정보 없음")
+            original_price = price_info.get("initial_formatted", "")
+            discount = price_info.get("discount_percent", 0)
+        elif d.get("is_free"):
+            price, original_price, discount = "무료", "", 0
+        else:
+            price, original_price, discount = "가격 정보 없음", "", 0
+
+        # 별점 / 리뷰
+        metacritic = d.get("metacritic", {})
+        metacritic_score = metacritic.get("score") if metacritic else None
+
+        # SteamSpy로 사용자 리뷰 수 보완
+        spy_resp = requests.get(
+            "https://steamspy.com/api.php",
+            params={"request": "appdetails", "appid": appid},
+            timeout=8,
+        )
+        spy = spy_resp.json() if spy_resp.ok else {}
+        positive  = spy.get("positive", 0)
+        negative  = spy.get("negative", 0)
+        total_rev = positive + negative
+        score_pct = round(positive / total_rev * 100, 1) if total_rev > 0 else None
+
+        # 리뷰 텍스트 (Steam Review API)
+        reviews_pos, reviews_neg = [], []
+        try:
+            rev_resp = requests.get(
+                f"https://store.steampowered.com/appreviews/{appid}",
+                params={
+                    "json": 1, "language": "koreana",
+                    "filter": "recent", "num_per_page": 10,
+                    "review_type": "all", "purchase_type": "all",
+                },
+                timeout=8,
+            )
+            if rev_resp.ok:
+                for r in rev_resp.json().get("reviews", []):
+                    text = r.get("review", "").strip()[:120]
+                    if not text:
+                        continue
+                    if r.get("voted_up"):
+                        if len(reviews_pos) < 5:
+                            reviews_pos.append(text)
+                    else:
+                        if len(reviews_neg) < 5:
+                            reviews_neg.append(text)
+        except Exception:
+            pass
+
+        return {
+            "appid":          appid,
+            "name":           d.get("name", ""),
+            "short_desc":     d.get("short_description", ""),
+            "header_image":   d.get("header_image", ""),
+            "store_url":      f"https://store.steampowered.com/app/{appid}/",
+            "price":          price,
+            "original_price": original_price,
+            "discount":       discount,
+            "metacritic":     metacritic_score,
+            "score_pct":      score_pct,
+            "positive":       positive,
+            "negative":       negative,
+            "total_reviews":  total_rev,
+            "genres":         [g["description"] for g in d.get("genres", [])],
+            "developers":     d.get("developers", []),
+            "release_date":   d.get("release_date", {}).get("date", ""),
+            "reviews_positive": reviews_pos,
+            "reviews_negative": reviews_neg,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"게임 검색 오류: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
 
 

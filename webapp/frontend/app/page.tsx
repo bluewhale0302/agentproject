@@ -12,8 +12,17 @@ interface SteamGame {
   appid: number; name: string; playtime_forever: number; img_icon_url: string;
 }
 interface SteamGamesResult { total_games: number; games: SteamGame[]; }
-interface ChatMessage { role: 'user' | 'gosya'; content: string; }
+interface ChatMessage { role: 'user' | 'gosya'; content: string; gameInfo?: GameInfo; }
 interface TopGame { rank: number; appid: number; name: string; players: number; owners: string; }
+
+interface GameInfo {
+  appid: number; name: string; short_desc: string; header_image: string;
+  store_url: string; price: string; original_price: string; discount: number;
+  metacritic: number | null; score_pct: number | null;
+  positive: number; negative: number; total_reviews: number;
+  genres: string[]; developers: string[]; release_date: string;
+  reviews_positive: string[]; reviews_negative: string[];
+}
 
 interface Ball {
   id: number; x: number; y: number;
@@ -52,6 +61,97 @@ function buildSteamContext(user: SteamUser | null, games: SteamGamesResult | nul
     games           ? `보유 게임: ${games.total_games}개` : '',
     top             ? `많이 플레이한 게임(상위 10): ${top}` : '',
   ].filter(Boolean).join('\n');
+}
+
+// ─── 게임 정보 카드 ──────────────────────────────────────────────────────────
+
+function GameInfoCard({ info }: { info: GameInfo }) {
+  const scoreColor = info.score_pct == null ? 'text-slate-400'
+    : info.score_pct >= 80 ? 'text-emerald-400'
+    : info.score_pct >= 60 ? 'text-yellow-400'
+    : 'text-red-400';
+
+  return (
+    <div className="mt-2 rounded-xl border border-slate-700 bg-slate-950 overflow-hidden text-sm">
+      {/* 헤더 이미지 */}
+      {info.header_image && (
+        <img src={info.header_image} alt={info.name} className="w-full h-28 object-cover" />
+      )}
+      <div className="p-3 space-y-2.5">
+        {/* 제목 + 링크 */}
+        <div className="flex items-start justify-between gap-2">
+          <p className="font-bold text-white leading-tight">{info.name}</p>
+          <a href={info.store_url} target="_blank" rel="noopener noreferrer"
+            className="shrink-0 text-xs text-blue-400 hover:underline">Steam →</a>
+        </div>
+
+        {/* 가격 + 별점 */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-1.5">
+            {info.discount > 0 && (
+              <span className="text-xs bg-green-700 text-white px-1.5 py-0.5 rounded font-bold">-{info.discount}%</span>
+            )}
+            {info.discount > 0 && info.original_price && (
+              <span className="text-xs text-slate-500 line-through">{info.original_price}</span>
+            )}
+            <span className="text-sm font-bold text-white">{info.price}</span>
+          </div>
+          {info.score_pct != null && (
+            <span className={`text-xs font-bold ${scoreColor}`}>
+              👍 {info.score_pct}% ({info.total_reviews.toLocaleString()}개 리뷰)
+            </span>
+          )}
+          {info.metacritic != null && (
+            <span className="text-xs bg-yellow-700/50 text-yellow-300 px-1.5 py-0.5 rounded">
+              메타크리틱 {info.metacritic}
+            </span>
+          )}
+        </div>
+
+        {/* 장르 / 개발사 / 출시일 */}
+        <div className="flex flex-wrap gap-1">
+          {info.genres.slice(0, 4).map(g => (
+            <span key={g} className="text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full">{g}</span>
+          ))}
+        </div>
+        {(info.developers.length > 0 || info.release_date) && (
+          <p className="text-xs text-slate-500">
+            {info.developers[0] && <span>개발: {info.developers[0]}</span>}
+            {info.developers[0] && info.release_date && <span className="mx-1">·</span>}
+            {info.release_date && <span>출시: {info.release_date}</span>}
+          </p>
+        )}
+
+        {/* 긍정 리뷰 */}
+        {info.reviews_positive.length > 0 && (
+          <div>
+            <p className="text-xs font-semibold text-emerald-400 mb-1">👍 긍정 리뷰 TOP {info.reviews_positive.length}</p>
+            <ul className="space-y-1">
+              {info.reviews_positive.map((r, i) => (
+                <li key={i} className="text-xs text-slate-300 bg-emerald-900/20 border border-emerald-900/40 rounded-lg px-2 py-1.5 leading-relaxed">
+                  "{r}{r.length >= 120 ? '...' : ''}"
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* 부정 리뷰 */}
+        {info.reviews_negative.length > 0 && (
+          <div>
+            <p className="text-xs font-semibold text-red-400 mb-1">👎 부정 리뷰 TOP {info.reviews_negative.length}</p>
+            <ul className="space-y-1">
+              {info.reviews_negative.map((r, i) => (
+                <li key={i} className="text-xs text-slate-300 bg-red-900/20 border border-red-900/40 rounded-lg px-2 py-1.5 leading-relaxed">
+                  "{r}{r.length >= 120 ? '...' : ''}"
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ─── 탱탱볼 박스 ─────────────────────────────────────────────────────────────
@@ -413,18 +513,77 @@ export default function Home() {
     setMessages(prev => [...prev, { role: 'user', content: text }]);
     setInput(''); setChatLoading(true);
 
+    // ── 게임 정보 조회 감지 ──
+    const gameQueryPattern = /(.+?)(?:게임|이라는 게임|이라는게임)?\s*(?:정보|가격|리뷰|평가|별점|어때|추천|알려)/;
+    const directGamePattern = /^(.{2,30})\s*(?:정보|가격|리뷰|평가|별점)$/;
+    const match = text.match(gameQueryPattern) || text.match(directGamePattern);
+
+    let gameInfo: GameInfo | null = null;
+    if (match) {
+      const gameName = match[1].trim();
+      try {
+        const gRes = await fetch('/api/games/steam/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: gameName }),
+        });
+        if (gRes.ok) gameInfo = await gRes.json();
+      } catch { /* 조회 실패 시 무시하고 AI만 응답 */ }
+    }
+
+    // ── 시스템 프롬프트 ──
     const ctx = buildSteamContext(user, games);
-    const prompt = [
-      '당신은 고스야(Gosya)라는 게임 전문 AI 어시스턴트입니다. 친근하고 유쾌한 한국어로 대화합니다.',
-      ctx ? `\n[Steam 정보]\n${ctx}` : '\n아직 Steam 정보가 없습니다.',
-      `\n유저: ${text}\n고스야:`,
-    ].join('');
+    const gameCtx = gameInfo ? `
+[조회된 게임 정보]
+게임명: ${gameInfo.name}
+가격: ${gameInfo.price}${gameInfo.discount > 0 ? ` (${gameInfo.discount}% 할인 중)` : ''}
+Steam 링크: ${gameInfo.store_url}
+사용자 평점: ${gameInfo.score_pct != null ? `${gameInfo.score_pct}% 긍정 (총 ${gameInfo.total_reviews}개 리뷰)` : '정보 없음'}
+메타크리틱: ${gameInfo.metacritic ?? '없음'}
+장르: ${gameInfo.genres.join(', ')}
+개발사: ${gameInfo.developers.join(', ')}
+출시일: ${gameInfo.release_date}
+긍정 리뷰 샘플: ${gameInfo.reviews_positive.slice(0, 3).join(' / ')}
+부정 리뷰 샘플: ${gameInfo.reviews_negative.slice(0, 3).join(' / ')}
+` : '';
+
+    const systemPrompt = `당신은 고스야(Gosya)라는 게임 전문 AI 어시스턴트입니다.
+
+[성격과 말투]
+- 친근하고 유쾌한 한국어로 대화합니다
+- 게임 추천, 가격 정보, 리뷰 분석을 잘합니다
+- 이모지를 적절히 사용합니다
+
+[규칙 — 반드시 지켜야 함]
+1. 욕설, 비속어, 혐오 표현이 포함된 질문에는 "앗, 그런 표현은 쓰지 말아주세요 😅 게임 이야기로 돌아와요!" 라고만 답합니다.
+2. 게임과 Steam과 전혀 관련 없는 질문(정치, 종교, 연애, 의학, 법률 등)에는 "저는 게임 전문이라 그쪽 분야는 잘 모르겠어요 🎮 게임 관련 질문이라면 뭐든 물어보세요!" 라고만 답합니다.
+3. 게임 정보가 조회된 경우, 반드시 아래 형식으로 답합니다:
+   - 가격과 Steam 링크 언급
+   - 별점/평점 요약
+   - 긍정 리뷰 핵심 3가지
+   - 부정 리뷰 핵심 3가지  
+   - 추가로 알면 좋은 정보 2~3가지 (예: 멀티플레이 여부, 한국어 지원, 플레이타임 등)
+${ctx ? `\n[유저 Steam 정보]\n${ctx}` : ''}
+${gameCtx}`;
+
+    const fullPrompt = `${systemPrompt}\n\n유저: ${text}\n고스야:`;
 
     try {
-      const res  = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt, max_tokens: 512, temperature: 0.85 }) });
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: fullPrompt, max_tokens: 800, temperature: 0.75 }),
+      });
       const data = await res.json();
-      if (!res.ok) { setMessages(prev => [...prev, { role: 'gosya', content: `오류: ${data.detail ?? res.status}` }]); return; }
-      setMessages(prev => [...prev, { role: 'gosya', content: data.text ?? '응답 없음' }]);
+      if (!res.ok) {
+        setMessages(prev => [...prev, { role: 'gosya', content: `오류: ${data.detail ?? res.status}` }]);
+        return;
+      }
+      setMessages(prev => [...prev, {
+        role: 'gosya',
+        content: data.text ?? '응답 없음',
+        gameInfo: gameInfo ?? undefined,
+      }]);
     } catch {
       setMessages(prev => [...prev, { role: 'gosya', content: '앗, 오류가 발생했어요. 잠시 후 다시 시도해주세요.' }]);
     } finally {
@@ -535,7 +694,9 @@ export default function Home() {
                   )}
                   <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap ${
                     msg.role === 'gosya' ? 'bg-slate-800 text-slate-100 rounded-tl-sm' : 'bg-blue-600 text-white rounded-tr-sm'
-                  }`}>{msg.content}</div>
+                  }`}>{msg.content}
+                    {msg.gameInfo && <GameInfoCard info={msg.gameInfo} />}
+                  </div>
                 </div>
               ))}
               {chatLoading && (
