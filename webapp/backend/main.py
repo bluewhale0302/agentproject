@@ -57,16 +57,21 @@ class SteamRequest(BaseModel):
 # ── LLM 서비스 (Groq) ─────────────────────────────────────────────────────────
 
 # Groq 모델 별칭 (짧은 이름 → 실제 모델명)
+# 최신 지원 모델: https://console.groq.com/docs/models
 _MODEL_ALIASES: Dict[str, str] = {
-    "qwen2.5":  "qwen2.5-coder-7b-instruct",
-    "qwen":     "qwen2.5-coder-7b-instruct",
-    "llama3":   "llama3-8b-8192",
-    "llama3.1": "llama-3.1-8b-instant",
-    "llama3.2": "llama-3.2-3b-preview",
-    "mixtral":  "mixtral-8x7b-32768",
-    "gemma":    "gemma2-9b-it",
+    "llama4":       "meta-llama/llama-4-scout-17b-16e-instruct",
+    "llama4scout":  "meta-llama/llama-4-scout-17b-16e-instruct",
+    "llama4maverick": "meta-llama/llama-4-maverick-17b-128e-instruct",
+    "llama3.3":     "llama-3.3-70b-versatile",
+    "llama3.1":     "llama-3.1-8b-instant",
+    "llama3":       "llama3-8b-8192",
+    "gemma":        "gemma2-9b-it",
+    "mixtral":      "mixtral-8x7b-32768",
+    # 구버전 별칭 (하위 호환)
+    "qwen2.5":      "llama-3.3-70b-versatile",
+    "qwen":         "llama-3.3-70b-versatile",
 }
-_DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen2.5")
+_DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "llama3.3")
 
 
 def _groq_generate(
