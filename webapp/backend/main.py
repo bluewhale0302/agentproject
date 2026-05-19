@@ -294,10 +294,6 @@ def steam_top_games():
     except Exception as exc:
         logger.error(f"Steam 인기 게임 조회 오류: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
-def search(query: str, top_k: int = 5):
-    if not query.strip():
-        raise HTTPException(status_code=400, detail="검색어가 비어있습니다.")
-    return _memory_search(query.strip(), top_k=min(top_k, 100))
 
 
 if __name__ == "__main__":

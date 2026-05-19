@@ -19,6 +19,8 @@ interface Ball {
   id: number; x: number; y: number;
   vx: number; vy: number;
   r: number; color: string;
+  imageUrl?: string; // 게임 이미지 공
+  label?: string;
 }
 
 // ─── 상수 ────────────────────────────────────────────────────────────────────
@@ -57,41 +59,27 @@ function buildSteamContext(user: SteamUser | null, games: SteamGamesResult | nul
 const BOX_W = 260;
 const BOX_H = 400;
 
-function BallBox() {
-  const [balls, setBalls] = useState<Ball[]>([]);
-  const rafRef = useRef<number>(0);
+function BallBox({ topGames }: { topGames: TopGame[] }) {
+  const [balls, setBalls]         = useState<Ball[]>([]);
+  const [clickCount, setClickCount] = useState(0);
+  const [shaking, setShaking]     = useState(false);
+  const [eventMsg, setEventMsg]   = useState('');
+  const rafRef   = useRef<number>(0);
   const ballsRef = useRef<Ball[]>([]);
+  const countRef = useRef(0);
+  const boxRef   = useRef<HTMLDivElement>(null);
 
-  const addBall = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const r = 10 + Math.random() * 12;
-    const speed = 3 + Math.random() * 3;
-    const angle = Math.random() * Math.PI * 2;
-    const newBall: Ball = {
-      id: Date.now() + Math.random(),
-      x, y, r,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed,
-      color: BALL_COLORS[Math.floor(Math.random() * BALL_COLORS.length)],
-    };
-    ballsRef.current = [...ballsRef.current, newBall];
-    setBalls([...ballsRef.current]);
-  }, []);
-
+  // ── 물리 루프 ──
   useEffect(() => {
     const tick = () => {
       ballsRef.current = ballsRef.current.map(b => {
         let { x, y, vx, vy, r } = b;
         x += vx; y += vy;
-        vy += 0.25; // 중력
-        if (x - r < 0)       { x = r;         vx = Math.abs(vx) * 0.85; }
-        if (x + r > BOX_W)   { x = BOX_W - r; vx = -Math.abs(vx) * 0.85; }
-        if (y - r < 0)       { y = r;         vy = Math.abs(vy) * 0.85; }
-        if (y + r > BOX_H)   { y = BOX_H - r; vy = -Math.abs(vy) * 0.85;
-          vx *= 0.98; // 바닥 마찰
-        }
+        vy += 0.3;
+        if (x - r < 0)     { x = r;         vx =  Math.abs(vx) * 0.82; }
+        if (x + r > BOX_W) { x = BOX_W - r; vx = -Math.abs(vx) * 0.82; }
+        if (y - r < 0)     { y = r;         vy =  Math.abs(vy) * 0.82; }
+        if (y + r > BOX_H) { y = BOX_H - r; vy = -Math.abs(vy) * 0.82; vx *= 0.97; }
         return { ...b, x, y, vx, vy };
       });
       setBalls([...ballsRef.current]);
@@ -101,37 +89,150 @@ function BallBox() {
     return () => cancelAnimationFrame(rafRef.current);
   }, []);
 
+  // ── 공 추가 ──
+  const spawnBall = useCallback((x: number, y: number, isGame = false) => {
+    const r     = isGame ? 22 : 10 + Math.random() * 12;
+    const speed = isGame ? 5 + Math.random() * 3 : 3 + Math.random() * 3;
+    const angle = Math.random() * Math.PI * 2;
+    const game  = isGame && topGames.length > 0
+      ? topGames[Math.floor(Math.random() * Math.min(topGames.length, 10))]
+      : null;
+    const ball: Ball = {
+      id: Date.now() + Math.random(),
+      x, y, r,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      color: BALL_COLORS[Math.floor(Math.random() * BALL_COLORS.length)],
+      imageUrl: game ? `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.appid}/capsule_sm_120.jpg` : undefined,
+      label: game?.name,
+    };
+    ballsRef.current = [...ballsRef.current, ball];
+    setBalls([...ballsRef.current]);
+  }, [topGames]);
+
+  // ── 클릭 ──
+  const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    countRef.current += 1;
+    setClickCount(countRef.current);
+    const n = countRef.current;
+
+    // 10개마다 이벤트
+    if (n % 10 === 0) {
+      // 게임 이미지 공 3개 폭발
+      for (let i = 0; i < 3; i++) {
+        setTimeout(() => spawnBall(
+          BOX_W / 2 + (Math.random() - 0.5) * 60,
+          BOX_H / 2 + (Math.random() - 0.5) * 60,
+          true
+        ), i * 80);
+      }
+      const msgs = ['🎮 게임 공 등장!', '🔥 인기 게임 폭발!', '⭐ 스팀 차트 공!', '🚀 레벨업!'];
+      setEventMsg(msgs[Math.floor(Math.random() * msgs.length)]);
+      setTimeout(() => setEventMsg(''), 2000);
+    } else {
+      spawnBall(x, y);
+    }
+  }, [spawnBall]);
+
+  // ── 흔들기 (마우스 드래그로 박스 흔들기) ──
+  const shakeRef = useRef(false);
+  const handleShake = useCallback(() => {
+    if (shakeRef.current || ballsRef.current.length === 0) return;
+    shakeRef.current = true;
+    setShaking(true);
+    // 모든 공에 랜덤 충격
+    ballsRef.current = ballsRef.current.map(b => ({
+      ...b,
+      vx: (Math.random() - 0.5) * 18,
+      vy: -Math.random() * 14 - 4,
+    }));
+    setBalls([...ballsRef.current]);
+    setTimeout(() => { setShaking(false); shakeRef.current = false; }, 500);
+  }, []);
+
   const clearBalls = (e: React.MouseEvent) => {
     e.stopPropagation();
     ballsRef.current = [];
     setBalls([]);
+    countRef.current = 0;
+    setClickCount(0);
   };
 
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4 flex flex-col gap-3">
+      {/* 헤더 */}
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-bold text-slate-300">🎱 탱탱볼</h2>
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-500">{balls.length}개</span>
+          <button onClick={handleShake} disabled={balls.length === 0}
+            title="흔들기"
+            className="text-xs px-2 py-0.5 rounded-lg border border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 disabled:opacity-30 transition">
+            🫨 흔들기
+          </button>
           {balls.length > 0 && (
             <button onClick={clearBalls}
               className="text-xs text-slate-500 hover:text-red-400 transition">초기화</button>
           )}
         </div>
       </div>
+
+      {/* 이벤트 메시지 */}
+      {eventMsg && (
+        <div className="text-center text-xs font-bold text-yellow-300 animate-bounce bg-yellow-900/30 rounded-lg py-1">
+          {eventMsg} ({clickCount}번째 클릭)
+        </div>
+      )}
+
+      {/* 다음 이벤트까지 */}
+      {clickCount > 0 && !eventMsg && (
+        <div className="flex items-center gap-1.5">
+          <div className="flex-1 h-1 rounded-full bg-slate-800 overflow-hidden">
+            <div className="h-full bg-violet-500 rounded-full transition-all"
+              style={{ width: `${(clickCount % 10) * 10}%` }} />
+          </div>
+          <span className="text-xs text-slate-600">{10 - (clickCount % 10)}번 남음</span>
+        </div>
+      )}
+
+      {/* 박스 */}
       <div
-        onClick={addBall}
-        className="relative rounded-xl border border-slate-700 bg-slate-950 cursor-crosshair overflow-hidden select-none"
+        ref={boxRef}
+        onClick={handleClick}
+        className={`relative rounded-xl border border-slate-700 bg-slate-950 cursor-crosshair overflow-hidden select-none transition-transform ${shaking ? 'animate-[shake_0.5s_ease-in-out]' : ''}`}
         style={{ width: BOX_W, height: BOX_H }}
       >
         {balls.length === 0 && (
-          <p className="absolute inset-0 flex items-center justify-center text-slate-600 text-xs pointer-events-none">
-            클릭하면 공이 생겨요
+          <p className="absolute inset-0 flex items-center justify-center text-slate-600 text-xs pointer-events-none text-center px-4">
+            클릭하면 공이 생겨요<br/>
+            <span className="text-slate-700">10번마다 게임 공 이벤트!</span>
           </p>
         )}
         <svg width={BOX_W} height={BOX_H} className="absolute inset-0">
-          {balls.map(b => (
-            <circle key={b.id} cx={b.x} cy={b.y} r={b.r} fill={b.color} opacity={0.9} />
+          <defs>
+            {balls.filter(b => b.imageUrl).map(b => (
+              <clipPath key={`clip-${b.id}`} id={`clip-${b.id}`}>
+                <circle cx={b.x} cy={b.y} r={b.r} />
+              </clipPath>
+            ))}
+          </defs>
+          {balls.map(b => b.imageUrl ? (
+            <g key={b.id}>
+              <circle cx={b.x} cy={b.y} r={b.r} fill="#1e293b" stroke="#818cf8" strokeWidth={2} />
+              <image
+                href={b.imageUrl}
+                x={b.x - b.r} y={b.y - b.r}
+                width={b.r * 2} height={b.r * 2}
+                clipPath={`url(#clip-${b.id})`}
+                preserveAspectRatio="xMidYMid slice"
+              />
+            </g>
+          ) : (
+            <circle key={b.id} cx={b.x} cy={b.y} r={b.r} fill={b.color} opacity={0.92} />
           ))}
         </svg>
       </div>
@@ -141,7 +242,7 @@ function BallBox() {
 
 // ─── Steam 인기 게임 슬라이드 ─────────────────────────────────────────────────
 
-function TopGamesSlide() {
+function TopGamesSlide({ onGamesLoaded }: { onGamesLoaded?: (games: TopGame[]) => void }) {
   const [games, setGames] = useState<TopGame[]>([]);
   const [loading, setLoading] = useState(true);
   const [idx, setIdx] = useState(0);
@@ -150,7 +251,12 @@ function TopGamesSlide() {
   useEffect(() => {
     fetch('/api/games/steam/top')
       .then(r => r.json())
-      .then(d => { setGames(d.games ?? []); setLoading(false); })
+      .then(d => {
+        const g = d.games ?? [];
+        setGames(g);
+        setLoading(false);
+        onGamesLoaded?.(g);
+      })
       .catch(() => setLoading(false));
   }, []);
 
@@ -263,6 +369,7 @@ export default function Home() {
   const [games, setGames]       = useState<SteamGamesResult | null>(null);
   const [steamLoading, setSteamLoading] = useState(false);
   const [steamError, setSteamError]     = useState('');
+  const [topGames, setTopGames] = useState<TopGame[]>([]);
 
   const [messages, setMessages] = useState<ChatMessage[]>([{
     role: 'gosya',
@@ -340,7 +447,7 @@ export default function Home() {
 
         {/* ── 왼쪽: 탱탱볼 ── */}
         <div className="shrink-0">
-          <BallBox />
+          <BallBox topGames={topGames} />
         </div>
 
         {/* ── 가운데: Steam + 고스야 ── */}
@@ -463,7 +570,7 @@ export default function Home() {
 
         {/* ── 오른쪽: Steam 인기 게임 ── */}
         <div className="shrink-0">
-          <TopGamesSlide />
+          <TopGamesSlide onGamesLoaded={setTopGames} />
         </div>
 
       </div>
